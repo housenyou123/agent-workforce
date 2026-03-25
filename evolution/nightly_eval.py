@@ -248,13 +248,20 @@ def run_nightly_evaluation(date_str: str) -> dict:
 
     agent_stats = []
     for agent_id, agent_traces in agent_groups.items():
-        scores = [compute_auto_score(t)[0] for t in agent_traces]
         costs = [t.get("estimated_cost_usd", 0) for t in agent_traces]
-        success_rate = sum(1 for s in scores if s >= 0.7) / len(scores)
+        completion_scores = [t.get("completion_score", 0.5) for t in agent_traces if t.get("completion_score") is not None]
+        quality_scores = [t.get("quality_score", 0.5) for t in agent_traces if t.get("quality_score") is not None]
+        completed = sum(1 for t in agent_traces if t.get("completion_status") == "completed")
+        failed = sum(1 for t in agent_traces if t.get("completion_status") == "failed")
+
         agent_stats.append({
             "agent": agent_id,
             "tasks": len(agent_traces),
-            "success_rate": round(success_rate, 2),
+            "completed": completed,
+            "failed": failed,
+            "success_rate": round(completed / len(agent_traces), 2) if agent_traces else 0,
+            "avg_completion": round(sum(completion_scores) / len(completion_scores), 2) if completion_scores else None,
+            "avg_quality": round(sum(quality_scores) / len(quality_scores), 2) if quality_scores else None,
             "cost": round(sum(costs), 2),
         })
 

@@ -293,6 +293,82 @@ def process_session(
     t.total_tokens = cost["total_tokens"]
     t.estimated_cost_usd = cost["estimated_cost_usd"]
 
+    # 9b. Done Spec 结果 — 自动填充
+    t.scope_respected = verification.get("files_in_boundary", True)
+    t.verification_passed = (
+        verification.get("build_passed") is not False
+        and verification.get("lint_passed") is not False
+        and verification.get("credentials_safe", True)
+    )
+    # deliverables_met: 有文件产出且验证通过
+    t.deliverables_met = (
+        len(files_modified) > 0
+        and t.verification_passed
+    )
+    # completion_status
+    if not t.scope_respected:
+        t.completion_status = "failed"
+    elif not verification.get("credentials_safe", True):
+        t.completion_status = "failed"
+    elif verification.get("build_passed") is False:
+        t.completion_status = "failed"
+    elif t.deliverables_met and t.verification_passed:
+        t.completion_status = "completed"
+    elif len(files_modified) == 0 and len(files_read) > 0:
+        t.completion_status = "completed"  # 纯查阅也算完成
+    else:
+        t.completion_status = "completed_with_concern"
+
+    # 9c. 双维度评分
+    # Completion Score: 是否完成 (确定性)
+    cs = 0.0
+    if t.deliverables_met:
+        cs += 0.35
+    if t.verification_passed:
+        cs += 0.35
+    if t.scope_respected:
+        cs += 0.15
+    # contract_respected — 暂时默认 true (无 contract 机制)
+    cs += 0.10
+    # handoff_ready — 暂时默认 true
+    cs += 0.05
+    if not t.verification_passed:
+        cs = min(cs, 0.59)  # Codex spec: verification 没过最高 0.59
+    if not t.scope_respected:
+        cs = 0.0  # 越界直接 0
+    t.completion_score = round(cs, 2)
+
+    # Quality Score: 完成质量 (混合信号)
+    qs = 0.0
+    # deterministic_checks (40%)
+    det = 0.0
+    if verification.get("build_passed") is True:
+        det += 0.5
+    elif verification.get("build_passed") is None:
+        det += 0.25  # 没跑 build 给一半
+    if verification.get("lint_passed") is True:
+        det += 0.5
+    elif verification.get("lint_passed") is None:
+        det += 0.25
+    qs += det * 0.40
+    # review_result (20%) — 暂时默认 pass
+    qs += 1.0 * 0.20
+    # human_feedback (20%) — 需要后续填充
+    fb = t.human_feedback
+    if fb == "golden":
+        qs += 1.0 * 0.20
+    elif fb == "thumbs_up":
+        qs += 0.8 * 0.20
+    elif fb == "rework":
+        qs += 0.4 * 0.20
+    elif fb == "thumbs_down":
+        qs += 0.0 * 0.20
+    else:
+        qs += 0.5 * 0.20  # 无反馈给中间值
+    # implicit_signals (20%) — 暂时默认中等
+    qs += 0.5 * 0.20
+    t.quality_score = round(qs, 2)
+
     # 10. Session 分类
     tier = classify_session(
         duration, len(calls), len(files_modified), prompt_count, verification

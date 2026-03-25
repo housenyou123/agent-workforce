@@ -86,22 +86,34 @@ class Trace:
     duration_sec: float = 0.0
     rounds: int = 0               # 对话轮次
 
-    # ─── 结果状态 ───
+    # ─── Done Spec 输入 (任务开始前定义) ───
+    deliverables: list[str] = field(default_factory=list)       # 需要交付什么
+    verification: list[str] = field(default_factory=list)       # 如何验证完成
+    constraints: list[str] = field(default_factory=list)        # 不能做什么
+    completion_rule: str = ""                                    # 什么算完成
+
+    # ─── Done Spec 结果 (任务完成后填充) ───
+    deliverables_met: Optional[bool] = None      # 交付物是否齐全
+    verification_passed: Optional[bool] = None   # 验证是否通过
+    scope_respected: Optional[bool] = None       # 是否越界
+    completion_status: str = ""                   # completed / completed_with_concern / blocked / failed
+
+    # ─── 确定性验证 ───
     build_success: Optional[bool] = None
     test_pass: Optional[bool] = None
     lint_clean: Optional[bool] = None
 
-    # ─── 人类显式反馈 ───
-    human_feedback: Optional[str] = None     # thumbs_up / thumbs_down / rework / golden
-    failure_type: Optional[str] = None       # A-G 分类
-    failure_note: Optional[str] = None       # 失败原因 (如有)
+    # ─── 双维度评分 ───
+    completion_score: Optional[float] = None     # [0, 1] 是否完成
+    quality_score: Optional[float] = None        # [0, 1] 完成质量
+
+    # ─── 人类反馈 ───
+    human_feedback: Optional[str] = None         # thumbs_up / thumbs_down / rework / golden
+    failure_type: Optional[str] = None           # misunderstanding / poor_execution / scope_creep / broken_output / inefficient / external_blocker
+    failure_note: Optional[str] = None
 
     # ─── 隐式信号 (夜间计算) ───
     implicit_signals: Optional[ImplicitSignals] = None
-
-    # ─── 计算得分 (夜间计算) ───
-    auto_score: Optional[float] = None       # [0, 1]
-    score_confidence: Optional[str] = None   # low / medium / high
 
 
 def generate_trace_id() -> str:

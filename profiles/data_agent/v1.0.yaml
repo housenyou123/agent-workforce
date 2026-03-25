@@ -93,3 +93,18 @@ lessons:
     lesson: "大数据集处理要分批，单次不超过 500 条"
   - from: "历史反馈"
     lesson: "用户经常期望可视化而非纯文字，目标不明确时主动询问输出格式"
+
+# ─── Done Spec 数据字段 (Codex spec 第十节) ───
+done_spec_fields:
+  - source_documented
+  - sample_size_documented
+  - confidence_documented
+  - chart_metadata_complete
+  - reproducible_script
+  - readonly_respected
+
+failure_definitions:
+  - "修改了原始数据"
+  - "结论无来源或样本量"
+  - "图表无标签"
+  - "分析不可复现"

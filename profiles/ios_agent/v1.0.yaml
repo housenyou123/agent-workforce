@@ -104,3 +104,18 @@ lessons:
     lesson: "@MainActor @Observable VM + actor Services 模式验证有效"
   - from: "Spot Playground"
     lesson: "2000+ 数据列表必须 LazyVStack + 虚拟滚动"
+
+# ─── Done Spec 数据字段 (Codex spec 第七节) ───
+done_spec_fields:
+  - ios_build_success
+  - swiftlint_clean
+  - dark_mode_checked
+  - preview_present
+  - api_contract_aligned
+
+# ─── 失败定义: 以下任一出现，run 不算完成 ───
+failure_definitions:
+  - "build fail"
+  - "越界定义 API (应由 Backend Agent 定义)"
+  - "修改后端 / web 代码"
+  - "无法说明如何验证"

@@ -83,3 +83,18 @@ workflow:
     - "编写脚本/配置"
     - "附带执行说明和注意事项"
     - "提交 artifact (标注: 需人类确认后执行)"
+
+# ─── Done Spec 数据字段 (Codex spec 第十一节) ───
+done_spec_fields:
+  - has_safe_shell_flags
+  - has_dockerignore
+  - uses_env_vars
+  - execution_guide_present
+  - dry_run_supported
+  - human_approval_required_marked
+
+failure_definitions:
+  - "直接部署 (未经人类确认)"
+  - "远程 SSH / 远程 DB 操作"
+  - "修改业务代码"
+  - "配置中泄露敏感信息"

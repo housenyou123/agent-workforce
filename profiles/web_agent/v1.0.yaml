@@ -99,3 +99,18 @@ lessons:
     lesson: "每个任务完成后必须产出可提交状态，不积累未提交代码"
   - from: "PE Tool"
     lesson: "prompt 管理界面是高频工具，改动要向后兼容"
+
+# ─── Done Spec 数据字段 (Codex spec 第九节) ───
+done_spec_fields:
+  - web_build_success
+  - eslint_clean
+  - no_blank_screen_verified
+  - loading_state_present
+  - error_state_present
+  - virtualization_used_if_large_list
+
+failure_definitions:
+  - "build fail"
+  - "ESLint error"
+  - "页面白屏"
+  - "API 调用与 contract 不一致"

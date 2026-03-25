@@ -76,6 +76,22 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_traces_project ON traces(project)
         """)
 
+        # Done Spec 字段 (v2)
+        new_columns = [
+            ("completion_score", "REAL"),
+            ("quality_score", "REAL"),
+            ("completion_status", "TEXT"),
+            ("deliverables_met", "INTEGER"),
+            ("verification_passed", "INTEGER"),
+            ("scope_respected", "INTEGER"),
+            ("session_tier", "TEXT"),
+        ]
+        for col_name, col_type in new_columns:
+            try:
+                db.execute(f"ALTER TABLE traces ADD COLUMN {col_name} {col_type}")
+            except:
+                pass  # 列已存在
+
 
 @contextmanager
 def get_db():
@@ -111,8 +127,11 @@ async def create_trace(request: Request):
             (trace_id, timestamp, project, scenario, agent_profile, goal,
              tool_call_count, files_modified, duration_sec, total_tokens,
              estimated_cost_usd, rounds, build_success, human_feedback,
-             failure_type, auto_score, score_confidence, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             failure_type, auto_score, score_confidence, raw_data,
+             completion_score, quality_score, completion_status,
+             deliverables_met, verification_passed, scope_respected, session_tier)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?)
         """, (
             trace_id,
             data.get("timestamp", ""),
@@ -132,6 +151,13 @@ async def create_trace(request: Request):
             data.get("auto_score"),
             data.get("score_confidence"),
             json.dumps(data, ensure_ascii=False),
+            data.get("completion_score"),
+            data.get("quality_score"),
+            data.get("completion_status"),
+            data.get("deliverables_met"),
+            data.get("verification_passed"),
+            data.get("scope_respected"),
+            data.get("session_tier"),
         ))
 
     return {"status": "ok", "trace_id": trace_id}

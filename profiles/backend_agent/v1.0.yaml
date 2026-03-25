@@ -107,3 +107,17 @@ lessons:
     lesson: "prompt 改动必须同步: 调用逻辑 → 类型定义 → PE Tool → 文档"
   - from: "AI Daily Digest"
     lesson: "远程服务的代码改动和部署必须分开，部署需人类操作"
+
+# ─── Done Spec 数据字段 (Codex spec 第八节) ───
+done_spec_fields:
+  - backend_build_success
+  - python_syntax_ok
+  - contract_updated
+  - curl_provided
+  - auth_guard_present
+
+failure_definitions:
+  - "API 改了但 contract 没改"
+  - "新 endpoint 无 curl 示例"
+  - "越界改 iOS / Web 代码"
+  - "执行了部署动作"
