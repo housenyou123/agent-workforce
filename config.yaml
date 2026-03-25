@@ -1,0 +1,78 @@
+##############################################################################
+# Agent Workforce — 全局配置
+##############################################################################
+
+# ─── 飞书群 ───
+feishu:
+  webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/6ef37044-4824-483b-a83e-fcd266554f71"
+
+# ─── 本地 LLM (夜间评测用) ───
+local_llm:
+  url: "http://localhost:8801/v1/chat/completions"
+  model: "qwen3.5-35b"
+  max_tokens: 2000
+  temperature: 0.3
+
+# ─── 模型分配 ───
+model_allocation:
+  orchestrator: "opus"
+  ios_agent: "sonnet"
+  backend_agent: "sonnet"
+  web_agent: "sonnet"
+  data_agent: "sonnet"
+  infra_agent: "sonnet"
+  reviewer: "sonnet"
+
+# ─── 评测配置 ───
+evaluation:
+  # 夜间评测时间 (cron)
+  schedule: "0 2 * * *"    # 每天凌晨 2 点
+  # 自动升级阈值: 回归测试 score 提升超过此值则自动升级
+  auto_upgrade_threshold: 0.05   # 5%
+  # Golden example 回放数量
+  regression_sample_size: 10
+  # 失败模式需要出现几次才触发改进提案
+  failure_pattern_min_count: 3
+
+# ─── Trace 配置 ───
+trace:
+  # 隐式信号计算
+  commit_delay_threshold_min: 5    # <5min = 直接用了
+  post_edit_ratio_threshold: 0.15  # <15% = 满意
+  follow_up_alert_threshold: 3     # >3 轮 = 理解力差
+
+# ─── 服务端 ───
+server:
+  url: "http://118.196.147.14:9100"
+  db_path: "/data/agent-workforce/traces.db"
+
+# ─── 项目 → Agent 映射 (唯一配置源) ───
+project_routes:
+  # PixelBeat 系列
+  "Desktop/CC/IOS Demo/PixelBeat": {project: "pixelbeat-ios", scenario: "ios_development", agent: "ios_agent"}
+  "Desktop/CC/IOS Demo/pixel-beat-backend": {project: "pixelbeat-backend", scenario: "backend_api", agent: "backend_agent"}
+  "Desktop/CC/IOS Demo/pupixel_pe_tool": {project: "pupixel-pe-tool", scenario: "web_frontend", agent: "web_agent"}
+  "Desktop/CC/IOS Demo": {project: "pixelbeat", scenario: "ios_development", agent: "ios_agent"}
+  # IPGuard
+  "Desktop/CC/IPGuard": {project: "ipguard", scenario: "ios_development", agent: "ios_agent"}
+  # Dog Story 系列
+  "Desktop/社交贴纸产品设计/ios-app": {project: "dog-story-ios", scenario: "ios_development", agent: "ios_agent"}
+  "Desktop/社交贴纸产品设计/backend": {project: "dog-story-backend", scenario: "backend_api", agent: "backend_agent"}
+  "Desktop/社交贴纸产品设计/sticker-vision": {project: "sticker-vision", scenario: "backend_api", agent: "backend_agent"}
+  "Desktop/社交贴纸产品设计/spot-playground": {project: "spot-playground", scenario: "web_frontend", agent: "web_agent"}
+  "Desktop/社交贴纸产品设计/gossip-dog-debug": {project: "gossip-dog-debug", scenario: "web_frontend", agent: "web_agent"}
+  "Desktop/社交贴纸产品设计": {project: "dog-story", scenario: "ios_development", agent: "ios_agent"}
+  # 数据项目
+  "Documents/instagram-us-college-ugc-data": {project: "instagram-ugc", scenario: "data_analysis", agent: "data_agent"}
+  "数据素材/发布意图分类项目/gt_web/frontend": {project: "gt-web-frontend", scenario: "web_frontend", agent: "web_agent"}
+  "数据素材/发布意图分类项目/gt_web/backend": {project: "gt-web-backend", scenario: "backend_api", agent: "backend_agent"}
+  # 基础设施
+  "projects/claude-api-proxy": {project: "claude-api-proxy", scenario: "infra", agent: "infra_agent"}
+  "openclaw": {project: "openclaw", scenario: "backend_api", agent: "backend_agent"}
+  "agent-workforce": {project: "agent-workforce", scenario: "infra", agent: "infra_agent"}
+
+# ─── 工作时间 ───
+schedule:
+  production_hours: "08:00-22:00"
+  evaluation_hours: "02:00-06:00"
+  mode_switch_requires_approval: true

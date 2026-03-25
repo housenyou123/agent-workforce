@@ -1,0 +1,300 @@
+##############################################################################
+# Agent Workforce — Enforcement Rules
+# 所有 Agent 行为的明文规定，按严重程度分四级
+# 此文件为 single source of truth，Hook/Reviewer/Evaluator 启动时加载
+# 只有人类可以修改此文件，Agent 只能建议修改（需飞书群二次确认）
+##############################################################################
+
+version: "1.0.0"
+last_updated: "2026-03-25"
+updated_by: "human"
+
+# ============================================================================
+# P0 — 绝对禁止 (Hook 硬拦截，无例外)
+# ============================================================================
+p0_rules:
+
+  - id: "P0-001"
+    name: "文件系统边界"
+    description: "Agent 只能读写 envelope 中 workdir 指定的目录及其子目录"
+    enforce: "hook_pre_execution"
+    action: "block"
+    details:
+      allowed_shared_readonly:
+        - "~/agent-workforce/profiles/"
+        - "~/agent-workforce/knowledge/"
+        - "~/agent-workforce/rules/"
+      always_blocked:
+        - "~/.ssh/"
+        - "~/.aws/"
+        - "~/.gnupg/"
+        - "~/.claude/settings.json"
+        - "~/.claude/mcp.json"
+        - "*/node_modules/"
+        - "*/.git/objects/"
+    on_violation: "terminate_agent + trace_mark_security_violation"
+
+  - id: "P0-002"
+    name: "凭据隔离"
+    description: "Agent 不得读取、输出、记录任何凭据/密钥/token"
+    enforce: "hook_output_scan"
+    action: "block"
+    details:
+      patterns:
+        - "(api[_-]?key|secret|token|password|credential)\\s*[:=]\\s*['\"][^'\"]{8,}"
+        - "sk-[a-zA-Z0-9]{20,}"
+        - "ghp_[a-zA-Z0-9]{36}"
+        - "AKIA[A-Z0-9]{16}"
+        - "-----BEGIN (RSA |EC )?PRIVATE KEY-----"
+      blocked_files:
+        - ".env"
+        - ".env.*"
+        - "credentials.json"
+        - "*.pem"
+        - "*.key"
+      blocked_env_vars:
+        - "*KEY*"
+        - "*SECRET*"
+        - "*TOKEN*"
+        - "*PASSWORD*"
+    on_violation: "terminate_agent + trace_mark_security_violation + feishu_alert"
+
+  - id: "P0-003"
+    name: "生产环境保护"
+    description: "Agent 不得直接操作生产环境"
+    enforce: "hook_pre_execution"
+    action: "block"
+    details:
+      blocked_commands:
+        - pattern: "ssh\\s+.*@"
+          reason: "禁止 SSH 到任何远程服务器"
+        - pattern: "git\\s+push\\s+.*\\b(main|master|production)\\b"
+          reason: "禁止 push 到主分支"
+        - pattern: "docker\\s+(stop|rm|kill|restart)\\s+"
+          reason: "禁止操作 Docker 容器"
+        - pattern: "(DROP|DELETE|TRUNCATE)\\s+(TABLE|DATABASE|COLLECTION)"
+          reason: "禁止删除数据库/表"
+        - pattern: "curl\\s+.*-X\\s*(POST|PUT|DELETE|PATCH).*\\b(118\\.196|172\\.86|10\\.60)"
+          reason: "禁止对生产 API 做写操作"
+      blocked_hosts:
+        - "118.196.147.14"   # 火山云 ECS
+        - "172.86.126.230"   # Cloudzy VPS
+        - "10.60.1.23"       # AWS VPC
+      exception: "人类在飞书群显式 approve 的部署任务"
+    on_violation: "block + feishu_alert"
+
+  - id: "P0-004"
+    name: "不可逆操作"
+    description: "任何不可逆操作必须先获得人类审批"
+    enforce: "hook_pre_execution"
+    action: "pause_and_ask_human"
+    details:
+      requires_approval:
+        - pattern: "rm\\s+(-rf?|--recursive)"
+          threshold: "删除超过 3 个文件"
+        - pattern: "git\\s+reset\\s+--hard"
+          always: true
+        - pattern: "git\\s+push\\s+--force"
+          always: true
+        - pattern: "git\\s+clean\\s+-[fd]"
+          always: true
+        - pattern: "npm\\s+publish"
+          always: true
+        - pattern: "pod\\s+trunk\\s+push"
+          always: true
+      paid_api_threshold: 50   # 单任务 API 调用次数阈值
+    on_violation: "pause + feishu_approval_request"
+
+# ============================================================================
+# P1 — 必须遵守 (违反时 Review Reject + 自动回滚 + 告警)
+# ============================================================================
+p1_rules:
+
+  - id: "P1-001"
+    name: "上游数据只读"
+    description: "Agent 不得修改上游数据源，只能读取"
+    enforce: "review_check"
+    action: "reject_and_rollback"
+    details:
+      readonly_paths:
+        - "*/raw_data/"
+        - "*/vlm_output/"
+        - "*/apify_output/"
+        - "*/original_photos/"
+        - "~/Documents/instagram-us-college-ugc-data/"
+      readonly_artifacts: "其他 agent 已注册的 final artifact"
+    reason: "Spot Playground 曾因修改上游 VLM 数据导致全线阻塞"
+
+  - id: "P1-002"
+    name: "跨 Agent 禁止直接通信"
+    description: "Agent 之间不得直接传递信息，必须通过 Artifact Registry"
+    enforce: "review_check"
+    action: "reject"
+    details:
+      forbidden:
+        - "在代码注释里给其他 agent 留消息"
+        - "创建 .agent-message / .handoff 等临时文件传话"
+        - "在 commit message 中包含指向其他 agent 的指令"
+      required_channel: "Envelope → Artifact Registry → Review Packet"
+    reason: "直接通信不可审计，信息会失真"
+
+  - id: "P1-003"
+    name: "单一职责边界"
+    description: "Agent 只做 envelope 中分配给自己的 subtask，不越界"
+    enforce: "review_check"
+    action: "reject_overscoped_changes"
+    details:
+      examples:
+        - "iOS Agent 不得修改后端代码"
+        - "Backend Agent 不得修改 SwiftUI 布局"
+        - "Data Agent 不得修改生产 pipeline"
+        - "Web Agent 不得修改 iOS 或后端代码"
+      exception: "Orchestrator 显式授权的跨界任务（记录在 envelope）"
+    reason: "Dog Story 5-agent 协议的核心经验"
+
+  - id: "P1-004"
+    name: "输出必须可验证"
+    description: "Agent 产出必须附带可执行的验证方式"
+    enforce: "review_check"
+    action: "reject_if_missing"
+    details:
+      code_change:
+        - "必须能 build (编译通过)"
+        - "如有测试 → 必须 test pass"
+        - "如无测试 → 说明如何人工验证"
+      api_change:
+        - "必须附带 curl 示例命令"
+        - "必须说明影响了哪些现有端点"
+      data_analysis:
+        - "必须附带数据来源和样本量"
+        - "结论必须标注置信度"
+
+  - id: "P1-005"
+    name: "契约变更必须广播"
+    description: "对 contract 的任何偏离必须注册为 discovery"
+    enforce: "review_check"
+    action: "reject_if_undeclared"
+    details:
+      check: "对比 artifact.api_spec vs envelope.contract"
+      required: "deviations_from_contract 字段不能为空（如果有偏离）"
+
+  - id: "P1-006"
+    name: "部署需人类确认"
+    description: "所有部署相关操作需要人类在飞书群确认"
+    enforce: "hook_pre_execution + review_check"
+    action: "pause_and_ask_human"
+    details:
+      covers:
+        - "git push (所有分支)"
+        - "render deploy"
+        - "任何远程服务器操作"
+        - "数据库 migration"
+        - "npm publish / pod push"
+    reason: "用户明确要求: 所有部署相关的事情都需要人类确认"
+
+# ============================================================================
+# P2 — 强烈建议 (违反时记录到 trace，夜间评测扣分)
+# ============================================================================
+p2_rules:
+
+  - id: "P2-001"
+    name: "先读后改"
+    description: "修改文件前必须先 Read 该文件"
+    enforce: "trace_analysis"
+    action: "score_penalty"
+    check: "trace 中每个 Edit 前是否有对应文件的 Read"
+    penalty: -0.1
+
+  - id: "P2-002"
+    name: "最小变更原则"
+    description: "只改目标要求的部分，不做额外重构/优化/美化"
+    enforce: "trace_analysis"
+    action: "score_penalty"
+    examples:
+      - "不顺手加 docstring"
+      - "不顺手改变量命名"
+      - "不顺手升级依赖版本"
+      - "不加 '以后可能用到' 的代码"
+    penalty: -0.05
+
+  - id: "P2-003"
+    name: "错误处理边界"
+    description: "只在系统边界做防御，内部调用信任上游"
+    enforce: "trace_analysis"
+    action: "score_penalty"
+    penalty: -0.05
+
+  - id: "P2-004"
+    name: "成本意识"
+    description: "优先用低成本方案完成任务"
+    enforce: "trace_analysis"
+    action: "score_penalty"
+    hierarchy:
+      - "本地 Qwen3-8B → Claude Haiku → Claude Sonnet → Claude Opus"
+      - "能用缓存结果的 → 不重新调用"
+    alert_threshold: "单任务成本 > $0.50"
+    penalty: -0.1
+
+  - id: "P2-005"
+    name: "产出格式一致"
+    description: "同一 scenario 的 agent 必须使用统一输出格式"
+    enforce: "trace_analysis"
+    action: "score_penalty"
+    penalty: -0.05
+
+# ============================================================================
+# P3 — 最佳实践 (夜间统计，用于进化优化，不扣分)
+# ============================================================================
+p3_rules:
+
+  - id: "P3-001"
+    name: "不确定时先澄清"
+    description: "目标模糊时先输出理解确认"
+    enforce: "nightly_statistics"
+    measure: "对比 '先澄清 vs 直接干' 的 auto_score 差异"
+
+  - id: "P3-002"
+    name: "拆步骤再执行"
+    description: "复杂任务先输出执行计划"
+    enforce: "nightly_statistics"
+    measure: "对比 '有计划 vs 无计划' 的成功率差异"
+
+  - id: "P3-003"
+    name: "自检再提交"
+    description: "提交 artifact 前自己跑一遍 review checklist"
+    enforce: "nightly_statistics"
+    measure: "对比 '自检 vs 不自检' 的 cross-review reject 率差异"
+
+# ============================================================================
+# 人类确认事项 (飞书群二次确认)
+# ============================================================================
+human_approval_required:
+
+  - id: "HA-001"
+    name: "新增 Agent"
+    description: "创建新的 Agent Profile"
+    flow: "Evaluator 提案 → 飞书 #审批请求 → 人类确认 → shadow 模式 1 周 → 飞书再确认 → 上线"
+
+  - id: "HA-002"
+    name: "模式切换"
+    description: "生产模式 ↔ 评测模式"
+    flow: "定时触发 → 飞书 #审批请求 → 人类确认 → 切换"
+
+  - id: "HA-003"
+    name: "规则修改"
+    description: "修改本文件中的任何规则"
+    flow: "建议生成 → 飞书 #审批请求 第一次确认 → diff 预览 → 飞书第二次确认 → 写入"
+
+  - id: "HA-004"
+    name: "部署操作"
+    description: "所有涉及远程服务器的操作"
+    flow: "Agent 产出部署脚本 → 飞书 #审批请求 → 人类确认后手动执行"
+
+# ============================================================================
+# 变更历史
+# ============================================================================
+changelog:
+  - version: "1.0.0"
+    date: "2026-03-25"
+    changes: "初始规则集: 4条P0 + 6条P1 + 5条P2 + 3条P3 + 4条人类确认事项"
+    updated_by: "human"

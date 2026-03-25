@@ -1,0 +1,28 @@
+[
+  {
+    "type": "low_success_rate",
+    "agent": "ios_agent",
+    "value": 0.2,
+    "sample_size": 5,
+    "detail": "ios_agent 成功率 20% (基于 5 个任务)"
+  },
+  {
+    "type": "low_success_rate",
+    "agent": "backend_agent",
+    "value": 0.0,
+    "sample_size": 4,
+    "detail": "backend_agent 成功率 0% (基于 4 个任务)"
+  },
+  {
+    "type": "low_success_rate",
+    "agent": "infra_agent",
+    "value": 0.0,
+    "sample_size": 17,
+    "detail": "infra_agent 成功率 0% (基于 17 个任务)"
+  },
+  {
+    "type": "high_retry_edits",
+    "value": 1,
+    "detail": "1 个任务反复编辑同一文件 >3 次"
+  }
+]

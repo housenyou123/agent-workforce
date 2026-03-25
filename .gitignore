@@ -1,0 +1,9 @@
+traces/
+__pycache__/
+*.pyc
+_archive/
+.DS_Store
+traces/.hook_buffer.jsonl
+traces/.current_goal
+traces/.prompt_count
+traces/.session_start

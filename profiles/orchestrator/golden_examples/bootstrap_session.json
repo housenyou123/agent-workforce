@@ -1,0 +1,48 @@
+{
+  "id": "golden_001",
+  "type": "system_design",
+  "date": "2026-03-25",
+  "source": "Agent Workforce 创建对话",
+
+  "goal": "设计并搭建一个 AI Agent 协作平台，支持白天生产、晚上进化",
+
+  "user_pattern": {
+    "style": "先调研后决策",
+    "steps": [
+      "给背景信息 (ChatGPT 方案)",
+      "给参考项目 (rd-agent)",
+      "要求调研替代方案 + 结合本地现状",
+      "提出硬约束 (人类确认事项)",
+      "确认方向后说'动手'",
+      "边做边补充需求 (飞书群、规则细化)",
+      "要求用户故事验证设计",
+      "测试后提出改进 (auto hook)"
+    ]
+  },
+
+  "constraints_given_by_user": [
+    "所有部署需要人类确认",
+    "只用 Claude，不引入外部 API",
+    "新增 Agent / 模式切换 / 规则修改需人类确认",
+    "用飞书群做反馈交互",
+    "执行层隔离，数据层聚合",
+    "Agent 行为要有强执行的明文规定"
+  ],
+
+  "deliverables": [
+    "README.md (项目文档)",
+    "rules/enforcement.yaml (P0-P3 四级规则)",
+    "7 个 Agent Profile YAML",
+    "scripts/trace_schema.py (Trace 系统)",
+    "scripts/envelope.py (Envelope + Artifact)",
+    "scripts/feishu_notify.py (飞书通知)",
+    "evolution/nightly_eval.py (夜间评测)",
+    "hooks/ (4 个自动 hook)",
+    "cli.py (CLI 入口)",
+    "docs/USER_GUIDE.md (使用指南)",
+    "config.yaml (全局配置)"
+  ],
+
+  "quality": "golden",
+  "notes": "这是系统自身的创建过程，包含完整的需求分析→架构设计→实现→测试→部署流程"
+}
