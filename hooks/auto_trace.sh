@@ -1,41 +1,62 @@
 #!/usr/bin/env bash
 ##############################################################################
-# Agent Workforce — Auto Trace Hook
+# Agent Workforce — Auto Trace Hook (PostToolUse)
 #
-# Claude Code PostToolUse hook: 每次工具调用后自动追加到当天 trace 日志。
 # 接收 stdin JSON: { tool_name, tool_input, tool_response }
+# 提取: tool_name, target (文件路径或命令), exit_code (Bash 专有)
 # 异步运行，不阻塞 Claude Code。
 ##############################################################################
 
 AW_DIR="$HOME/agent-workforce"
-AW_TRACES="$AW_DIR/traces"
 LOG="$AW_DIR/traces/.hook_buffer.jsonl"
+mkdir -p "$AW_DIR/traces"
 
-mkdir -p "$AW_TRACES"
+# 读 stdin 一次，存到临时文件 (避免 shell 变量转义问题)
+TMPFILE=$(mktemp)
+cat > "$TMPFILE"
 
-# 读 stdin
-INPUT=$(cat)
+# 用一次 python 调用提取所有字段
+RESULT=$(python3 -c "
+import sys, json
+try:
+    with open('$TMPFILE') as f:
+        d = json.load(f)
+    tool = d.get('tool_name', '')
+    ti = d.get('tool_input', {})
+    tr = d.get('tool_response', {})
 
-# 提取关键字段
-TOOL_NAME=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null)
-TOOL_INPUT=$(echo "$INPUT" | python3 -c "
-import sys,json
-d=json.load(sys.stdin)
-ti = d.get('tool_input',{})
-# 只保留关键信息，避免日志太大
-if isinstance(ti, dict):
-    fp = ti.get('file_path','') or ti.get('path','')
-    cmd = ti.get('command','')[:100] if ti.get('command') else ''
-    pattern = ti.get('pattern','')
-    if fp: print(fp)
-    elif cmd: print(cmd)
-    elif pattern: print(pattern)
-    else: print(str(ti)[:80])
-else:
-    print(str(ti)[:80])
+    # target: 文件路径 或 命令
+    target = ''
+    if isinstance(ti, dict):
+        target = ti.get('file_path', '') or ti.get('path', '') or ti.get('command', '')[:100] or ti.get('pattern', '') or str(ti)[:80]
+    else:
+        target = str(ti)[:80]
+
+    # exit_code: 只有 Bash 有
+    exit_code = ''
+    if tool == 'Bash' and isinstance(tr, dict):
+        ec = tr.get('exit_code')
+        if ec is not None:
+            exit_code = str(ec)
+
+    # 输出用 tab 分隔
+    print(f'{tool}\t{target}\t{exit_code}')
+except:
+    print('\t\t')
 " 2>/dev/null)
+
+TOOL_NAME=$(echo "$RESULT" | cut -f1)
+TOOL_TARGET=$(echo "$RESULT" | cut -f2)
+EXIT_CODE=$(echo "$RESULT" | cut -f3)
 
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%S+08:00)
 
-# 追加到 buffer（每个工具调用一条）
-echo "{\"ts\":\"$TIMESTAMP\",\"tool\":\"$TOOL_NAME\",\"target\":\"$TOOL_INPUT\"}" >> "$LOG"
+# 构造 JSON (包含 exit_code)
+if [ -n "$EXIT_CODE" ]; then
+    echo "{\"ts\":\"$TIMESTAMP\",\"tool\":\"$TOOL_NAME\",\"target\":\"$TOOL_TARGET\",\"exit_code\":$EXIT_CODE}" >> "$LOG"
+else
+    echo "{\"ts\":\"$TIMESTAMP\",\"tool\":\"$TOOL_NAME\",\"target\":\"$TOOL_TARGET\"}" >> "$LOG"
+fi
+
+# 清理
+rm -f "$TMPFILE"

@@ -117,10 +117,11 @@ def run_verification(calls: list[dict], files_modified: list[str], cwd: str) -> 
         if call.get("tool") == "Bash":
             cmd = call.get("target", "").lower()
             if any(k in cmd for k in ["build", "xcodebuild", "tsc", "next build", "vite build"]):
-                # 检测到 build 命令被执行
-                # 当前无法确定 exit_code，标记为"已执行但结果未知"
-                # TODO: 在 auto_trace.sh 中捕获 exit_code 才能确定 pass/fail
-                result["build_passed"] = None  # None = 已执行但结果未知，不假装通过
+                exit_code = call.get("exit_code")
+                if exit_code is not None:
+                    result["build_passed"] = (exit_code == 0)
+                else:
+                    result["build_passed"] = None  # 旧 trace 没有 exit_code
                 result["build_ran"] = True
                 break
 
@@ -129,7 +130,11 @@ def run_verification(calls: list[dict], files_modified: list[str], cwd: str) -> 
         if call.get("tool") == "Bash":
             cmd = call.get("target", "").lower()
             if any(k in cmd for k in ["lint", "eslint", "swiftlint", "prettier", "ruff"]):
-                result["lint_passed"] = None  # 同上，结果未知
+                exit_code = call.get("exit_code")
+                if exit_code is not None:
+                    result["lint_passed"] = (exit_code == 0)
+                else:
+                    result["lint_passed"] = None
                 result["lint_ran"] = True
                 break
 
