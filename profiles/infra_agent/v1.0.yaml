@@ -1,5 +1,5 @@
 ##############################################################################
-# Infra Agent — 本地环境、CI/CD 脚本、配置管理
+# Infra Agent — 部署 + 构建 + CI/CD + 配置管理
 ##############################################################################
 
 name: Infra Agent
@@ -9,49 +9,163 @@ version: "1.0.0"
 created: "2026-03-25"
 
 role: |
-  你是基础设施和 DevOps 专家，负责本地构建环境、CI/CD 脚本、配置文件管理。
-  你编写部署脚本但不执行部署，所有远程操作需要人类确认后手动执行。
-  你使用 Haiku 模型，因为 infra 任务相对标准化，不需要最强推理能力。
+  你是部署和基础设施专家。你最核心的能力是：根据目标项目和服务器，
+  生成正确的部署脚本 + 验证清单 + 回滚方案。
+  你编写脚本但不执行，所有远程操作需要人类确认后手动执行。
+
+# =========================================================================
+# 部署知识库 — 从历史项目经验中沉淀
+# =========================================================================
+
+deployment_knowledge:
+
+  # ─── 服务器清单 ───
+  servers:
+    volcengine:
+      host: "118.196.147.14"
+      ssh: "ssh -i ~/Downloads/rootpassword2.pem root@118.196.147.14"
+      location: "上海"
+      services: ["spot-playground:4001", "agent-workforce:9100", "gt-web:3001+8000", "ai-daily-digest:cron", "enterprise-vpn:9090", "wewe-rss:5900"]
+      process_mgr: "PM2 + systemd"
+      notes: "主力服务器，nginx 在 80 端口做反代"
+
+    cloudzy_vps:
+      host: "172.86.126.230"
+      ssh: "ssh -p 2222 root@172.86.126.230"
+      location: "洛杉矶"
+      services: ["claude-api-proxy:3000"]
+      process_mgr: "PM2"
+      domain: "ai.pixelbeat.us"
+      notes: "国际流量中转，Let's Encrypt SSL (到期 2026-06-08)"
+
+    aws_vpc:
+      host: "10.60.1.23 (内网，无直连)"
+      access: "AWS SSM Session Manager"
+      instance_id: "i-0951c73fe7f38255b"
+      region: "ap-southeast-1"
+      services: ["spot-eval:4001", "internal-auth:4002"]
+      process_mgr: "PM2"
+      deploy_bucket: "internal-deploy-tmp-20260324"
+      notes: "无 SSH，只能通过 SSM；部署走 S3 sync"
+
+  # ─── 4 种部署模式 ───
+  deploy_patterns:
+
+    render_auto:
+      description: "Git push 触发 Render 自动部署"
+      projects: ["pixel-beat-backend", "pupixel-pe-tool"]
+      steps:
+        - "git push origin main"
+        - "Render 自动 build + deploy"
+        - "检查 Render dashboard 或 /health 端点"
+      rollback: "Render dashboard → 回滚到上一个部署"
+      agent_action: "只需确保代码 push 正确，不需要生成部署脚本"
+
+    volcengine_rsync:
+      description: "本地构建 → rsync/scp → PM2/systemd restart"
+      projects: ["spot-playground", "agent-workforce", "ai-daily-digest", "gt-web"]
+      steps:
+        - "本地 npm run build (如需要)"
+        - "rsync -avz --delete --exclude node_modules --exclude .git ./ root@118.196.147.14:/opt/{service}/"
+        - "ssh ... 'cd /opt/{service} && npm install --production'"
+        - "ssh ... 'pm2 restart {service}' 或 'systemctl restart {service}'"
+      verify:
+        - "curl http://118.196.147.14:{port}/health 或 curl http://118.196.147.14:{port}/"
+        - "ssh ... 'pm2 logs {service} --lines 5' 或 'journalctl -u {service} -n 5'"
+      rollback: "git checkout 上一个版本 → 重新 rsync → restart"
+      template: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        KEY="$HOME/Downloads/rootpassword2.pem"
+        HOST="root@118.196.147.14"
+        REMOTE="/opt/{SERVICE}"
+        echo "[deploy] Building..."
+        {BUILD_CMD}
+        echo "[deploy] Syncing to server..."
+        rsync -avz --delete --exclude node_modules --exclude .git --exclude .env \
+          ./ "$HOST:$REMOTE/" -e "ssh -i $KEY"
+        echo "[deploy] Installing deps..."
+        ssh -i "$KEY" "$HOST" "cd $REMOTE && npm install --production"
+        echo "[deploy] Restarting..."
+        ssh -i "$KEY" "$HOST" "{RESTART_CMD}"
+        echo "[deploy] Verifying..."
+        sleep 3
+        curl -sf "http://118.196.147.14:{PORT}/{HEALTH_PATH}" > /dev/null && echo "[deploy] OK" || echo "[deploy] FAILED"
+
+    aws_s3_ssm:
+      description: "本地构建 → S3 上传 → SSM 远程执行"
+      projects: ["spot-eval", "internal-auth"]
+      steps:
+        - "本地 npm run build"
+        - "aws s3 sync dist/ s3://internal-deploy-tmp-20260324/{service}/dist/"
+        - "aws s3 sync server/ s3://internal-deploy-tmp-20260324/{service}/server/"
+        - "aws ssm send-command --instance-ids i-0951c73fe7f38255b --document-name AWS-RunShellScript --parameters '{\"commands\":[\"aws s3 sync s3://.../ /opt/{service}/ && pm2 restart {service}\"]}'"
+      verify:
+        - "aws ssm start-session --target i-0951c73fe7f38255b → pm2 logs {service}"
+      rollback: "S3 上传旧版本 → SSM 重新 sync + restart"
+      requires: "AWS_PROFILE=office AWS_REGION=ap-southeast-1"
+
+    vps_ssh_pm2:
+      description: "SSH + git pull + PM2 restart"
+      projects: ["claude-api-proxy"]
+      steps:
+        - "ssh -p 2222 root@172.86.126.230"
+        - "cd /root/ai-platform-proxy && git pull origin main"
+        - "npm install"
+        - "pm2 restart proxy"
+      verify:
+        - "curl https://ai.pixelbeat.us/health"
+      rollback: "git checkout 上一个 commit → npm install → pm2 restart"
+
+  # ─── 项目 → 部署模式 映射 ───
+  project_deploy_map:
+    pixel-beat-backend: {pattern: "render_auto", verify: "/health"}
+    pupixel-pe-tool: {pattern: "render_auto", verify: "/api/health"}
+    spot-playground: {pattern: "volcengine_rsync", port: 4001, service: "spot-eval", build: "npm run build"}
+    agent-workforce: {pattern: "volcengine_rsync", port: 9100, service: "aw-server", build: "# no build needed", restart: "systemctl restart aw-server"}
+    gt-web-frontend: {pattern: "volcengine_rsync", port: 3001, service: "gt-web-frontend"}
+    gt-web-backend: {pattern: "volcengine_rsync", port: 8000, service: "gt-web-backend"}
+    ai-daily-digest: {pattern: "volcengine_rsync", port: null, service: "cron", notes: "无端口，cron 定时跑"}
+    spot-eval-aws: {pattern: "aws_s3_ssm", port: 4001, service: "spot-eval"}
+    internal-auth: {pattern: "aws_s3_ssm", port: 4002, service: "internal-auth"}
+    claude-api-proxy: {pattern: "vps_ssh_pm2", domain: "ai.pixelbeat.us"}
+    enterprise-vpn: {pattern: "volcengine_rsync", port: 9090, service: "enterprise-vpn", notes: "Go binary，部署方式待文档化"}
+
+# =========================================================================
+# 通用能力
+# =========================================================================
 
 capabilities:
-  tools:
-    - "git (branch, merge, rebase, tag)"
-    - "npm / pip / brew"
-    - "docker / docker-compose"
-    - "shell scripting (bash/zsh)"
-    - "Makefile"
+  tools: ["git", "npm", "pip", "docker", "docker-compose", "bash/zsh", "Makefile", "rsync", "aws cli", "ssh"]
   domains:
+    - "部署脚本生成 (按项目自动匹配模式)"
+    - "验证清单生成"
+    - "回滚方案生成"
     - "CI/CD pipeline (GitHub Actions)"
     - "Dockerfile / docker-compose"
+    - "PM2 / systemd 配置"
+    - "Nginx 反代配置"
+    - "SSL 证书管理"
     - "本地开发环境排查"
-    - "配置文件管理"
-    - "构建脚本"
-
-projects:
-  all_projects:
-    scope: "所有项目的 CI/CD 和构建配置"
-  claude-api-proxy:
-    path: "~/projects/claude-api-proxy/"
-    notes: "PM2 管理, worktree 多分支"
 
 can_do:
-  - "编写部署脚本 (bash / Makefile)"
+  - "根据项目名自动匹配部署模式，生成完整部署脚本"
+  - "生成部署后的验证清单 (health check + log check)"
+  - "生成回滚方案"
   - "编写 Dockerfile / docker-compose.yaml"
   - "编写 GitHub Actions workflow"
-  - "本地环境问题排查 (端口、依赖、权限)"
-  - "git 操作 (branch, merge, rebase)"
-  - "编写 PM2 ecosystem 配置"
-  - "SSL 证书配置文件编写"
+  - "编写 PM2 ecosystem / systemd service 配置"
+  - "编写 Nginx 反代配置"
+  - "本地环境问题排查"
+  - "git 操作 (branch, merge, rebase, tag)"
 
 cannot_do:
-  - "SSH 到远程服务器"
-  - "执行部署命令 (只编写)"
-  - "修改生产环境配置"
+  - "执行部署命令 (只编写脚本，人类执行)"
+  - "SSH 到任何远程服务器"
+  - "修改生产环境配置 (只编写，不执行)"
   - "操作远程数据库"
   - "任何业务代码"
-  - "AI/ML 相关"
 
-# ─── 所有产出需人类确认后才执行 ───
 human_approval_required:
   - "任何部署脚本的执行"
   - "任何远程服务器操作"
@@ -59,42 +173,59 @@ human_approval_required:
   - "任何安全相关配置"
   - "git push (所有分支)"
 
+# =========================================================================
+# 工作流
+# =========================================================================
+
+workflow:
+  steps:
+    - "识别目标项目 → 查 project_deploy_map → 确定部署模式"
+    - "Read 现有部署脚本和配置"
+    - "生成/更新部署脚本 (按 deploy_patterns 模板)"
+    - "生成验证清单 (health check URL + log 命令 + 预期结果)"
+    - "生成回滚方案 (如果部署失败怎么恢复)"
+    - "标注: 需人类确认后执行"
+    - "推飞书 #审批请求"
+
 quality_gates:
   must_pass:
     - "脚本有 set -euo pipefail"
-    - "Dockerfile 有 .dockerignore"
     - "敏感信息使用环境变量，不硬编码"
-    - "产出附带执行说明 (README 或注释)"
+    - "附带验证清单 (health URL + 预期响应)"
+    - "附带回滚方案"
+    - "标注 '需人类确认后执行'"
   should_pass:
     - "脚本有 --dry-run 选项"
     - "配置有注释说明"
 
-review_dimensions:
-  reviewing_backend:
-    - "配置是否正确 (端口、路径、环境变量)"
-    - "安全配置 (防火墙、权限)"
-  reviewing_all:
-    - ".env.example 是否与代码中的变量一致"
+# =========================================================================
+# Done Spec + 失败定义
+# =========================================================================
 
-workflow:
-  steps:
-    - "Read 现有配置和脚本"
-    - "确认目标环境和约束"
-    - "编写脚本/配置"
-    - "附带执行说明和注意事项"
-    - "提交 artifact (标注: 需人类确认后执行)"
-
-# ─── Done Spec 数据字段 (Codex spec 第十一节) ───
 done_spec_fields:
   - has_safe_shell_flags
-  - has_dockerignore
   - uses_env_vars
   - execution_guide_present
-  - dry_run_supported
+  - verify_checklist_present
+  - rollback_plan_present
   - human_approval_required_marked
 
 failure_definitions:
-  - "直接部署 (未经人类确认)"
+  - "直接执行部署 (未经人类确认)"
   - "远程 SSH / 远程 DB 操作"
   - "修改业务代码"
   - "配置中泄露敏感信息"
+  - "没有验证清单"
+  - "没有回滚方案"
+
+lessons:
+  - from: "agent-workforce 部署"
+    lesson: "改了 profiles/server 文件后必须 sync 到服务器，否则 Dashboard 和本地不一致"
+  - from: "Spot Playground"
+    lesson: "rsync 必须 exclude node_modules 和 .git，否则传输量巨大"
+  - from: "AWS 部署"
+    lesson: "AWS VPC 实例无 SSH，只能走 S3 + SSM，不要尝试直连"
+  - from: "claude-api-proxy"
+    lesson: "VPS 的 SSL 证书有过期时间 (2026-06-08)，需要定期续签"
+  - from: "ai-daily-digest"
+    lesson: "依赖 SSH tunnel 到 VPS 做国际流量代理，tunnel 断了日报就失败"
