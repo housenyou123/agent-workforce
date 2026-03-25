@@ -85,6 +85,7 @@ def init_db():
             ("verification_passed", "INTEGER"),
             ("scope_respected", "INTEGER"),
             ("session_tier", "TEXT"),
+            ("summary", "TEXT"),
         ]
         for col_name, col_type in new_columns:
             try:
@@ -129,9 +130,9 @@ async def create_trace(request: Request):
              estimated_cost_usd, rounds, build_success, human_feedback,
              failure_type, auto_score, score_confidence, raw_data,
              completion_score, quality_score, completion_status,
-             deliverables_met, verification_passed, scope_respected, session_tier)
+             deliverables_met, verification_passed, scope_respected, session_tier, summary)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             trace_id,
             data.get("timestamp", ""),
@@ -158,6 +159,7 @@ async def create_trace(request: Request):
             data.get("verification_passed"),
             data.get("scope_respected"),
             data.get("session_tier"),
+            data.get("summary"),
         ))
 
     return {"status": "ok", "trace_id": trace_id}
@@ -465,13 +467,27 @@ async def dashboard():
     traces_html = ""
     for r in recent:
         fb = feedback_emoji.get(r["human_feedback"], "—")
-        goal = (r["goal"] or "")[:60]
+        # 优先显示 summary (agent 做了什么)，fallback 到 goal (用户说了什么)
+        raw_data = {}
+        try:
+            raw_data = json.loads(r.get("raw_data") or "{}")
+        except:
+            pass
+        summary = raw_data.get("summary", "")
+        goal_text = (r["goal"] or "")[:60]
+        # 过滤无意义的 goal (太短或是纯对话)
+        if not summary and len(goal_text) <= 5:
+            display_goal = f'<span style="color:#86868b">{goal_text or "—"}</span>'
+        elif summary:
+            display_goal = summary[:70]
+        else:
+            display_goal = goal_text
         dur = f"{r['duration_sec']:.0f}s" if r["duration_sec"] else "—"
         traces_html += f"""
         <tr>
             <td><code>{r['trace_id']}</code></td>
             <td>{r['project'] or '—'}</td>
-            <td>{goal}</td>
+            <td>{display_goal}</td>
             <td>{r['agent_profile'] or '—'}</td>
             <td>{dur}</td>
             <td style="font-size:20px">{fb}</td>
@@ -541,7 +557,7 @@ async def dashboard():
 
         <h2>Recent Traces</h2>
         <table>
-            <tr><th>Trace</th><th>Project</th><th>Goal</th><th>Agent</th><th>Duration</th><th>Feedback</th><th>Rate</th></tr>
+            <tr><th>Trace</th><th>Project</th><th>Summary</th><th>Agent</th><th>Duration</th><th>Feedback</th><th>Rate</th></tr>
             {traces_html}
         </table>
     </body>

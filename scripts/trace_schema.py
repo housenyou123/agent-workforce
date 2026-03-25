@@ -62,7 +62,8 @@ class Trace:
     scenario: str = ""            # ios_development / backend_api / web_frontend / data_analysis / infra
 
     # ─── 任务输入 ───
-    goal: str = ""
+    goal: str = ""                        # 用户原始 prompt
+    summary: str = ""                     # agent 实际做了什么 (从 tool calls 生成)
     goal_token_count: int = 0
     context_files_read: list[str] = field(default_factory=list)
 

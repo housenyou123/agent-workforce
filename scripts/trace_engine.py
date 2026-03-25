@@ -95,6 +95,99 @@ def estimate_cost(tool_calls: list[dict], model: str = DEFAULT_MODEL) -> dict:
     }
 
 
+def generate_summary(calls: list[dict], files_modified: list[str], files_read: list[str], goal: str) -> str:
+    """
+    从实际 tool calls 生成任务摘要，替代用户原始 prompt。
+
+    输出示例:
+      "修改 trace_engine.py, auto_trace.sh (编辑 5 处, build ok)"
+      "排查 VPN: 执行 ssh, curl, ping (读 3 文件)"
+      "(对话)"
+    """
+    if not calls:
+        return "(对话)"
+
+    # 提取关键信息
+    edited_files = [os.path.basename(f) for f in files_modified[:4]]
+    read_files = [os.path.basename(f) for f in files_read[:3]]
+    edit_count = sum(1 for c in calls if c.get("tool") in ("Edit", "Write"))
+    bash_cmds = [c.get("target", "")[:40] for c in calls if c.get("tool") == "Bash"]
+
+    # 提取关键命令 (build/test/deploy/网络)
+    key_cmds = []
+    for cmd in bash_cmds:
+        cmd_lower = cmd.lower()
+        if any(k in cmd_lower for k in ["build", "xcodebuild", "tsc", "vite"]):
+            key_cmds.append("build")
+        elif any(k in cmd_lower for k in ["test", "jest", "pytest"]):
+            key_cmds.append("test")
+        elif any(k in cmd_lower for k in ["deploy", "scp", "rsync", "s3 sync"]):
+            key_cmds.append("deploy")
+        elif any(k in cmd_lower for k in ["curl", "ssh", "ping"]):
+            key_cmds.append("网络检查")
+        elif any(k in cmd_lower for k in ["git commit", "git push"]):
+            key_cmds.append("git")
+        elif any(k in cmd_lower for k in ["install", "pip", "npm"]):
+            key_cmds.append("install")
+    key_cmds = list(dict.fromkeys(key_cmds))  # 去重保序
+
+    # 检查 build 结果
+    build_result = ""
+    for c in reversed(calls):
+        if c.get("tool") == "Bash":
+            cmd_lower = c.get("target", "").lower()
+            if any(k in cmd_lower for k in ["build", "xcodebuild", "tsc"]):
+                ec = c.get("exit_code")
+                if ec == 0:
+                    build_result = "build ok"
+                elif ec is not None:
+                    build_result = "build failed"
+                break
+
+    # 组装摘要
+    parts = []
+
+    if edited_files:
+        files_str = ", ".join(edited_files)
+        if len(files_modified) > 4:
+            files_str += f" +{len(files_modified) - 4}"
+        parts.append(f"修改 {files_str}")
+    elif read_files and not bash_cmds:
+        parts.append(f"查阅 {', '.join(read_files)}")
+
+    details = []
+    if edit_count > 0:
+        details.append(f"编辑 {edit_count} 处")
+    if build_result:
+        details.append(build_result)
+
+    if edited_files and details:
+        # 有文件修改时，details 作为补充
+        parts.append(f"({'; '.join(details)})")
+    elif not edited_files and key_cmds:
+        # 无文件修改时，key_cmds 作为主体
+        pass  # 会在下面的 "not parts" 分支处理
+
+    if not parts:
+        # 只有 bash 命令没有文件操作
+        if bash_cmds:
+            if key_cmds:
+                parts.append(f"执行: {', '.join(key_cmds)} ({len(bash_cmds)} 条命令)")
+            else:
+                # 取第一条有意义的命令作为摘要
+                meaningful = [c[:50] for c in bash_cmds if len(c) > 3 and not c.startswith('#')]
+                if meaningful:
+                    parts.append(f"执行: {meaningful[0]}")
+                else:
+                    parts.append(f"执行 {len(bash_cmds)} 条命令")
+        elif read_files:
+            parts.append(f"查阅 {', '.join(read_files)}")
+        else:
+            return "(对话)"
+
+    return " ".join(parts)
+
+
 def run_verification(calls: list[dict], files_modified: list[str], cwd: str) -> dict:
     """
     确定性验证 — 从工具调用记录中提取验证结果
@@ -282,12 +375,15 @@ def process_session(
     cost = estimate_cost(calls, model=DEFAULT_MODEL)
 
     # 9. 构造 trace
+    summary = generate_summary(calls, files_modified, files_read, goal)
+
     t = new_trace(
         goal=goal,
         project=project,
         scenario=scenario,
         agent_profile=f"{agent_id}_v1.0",
     )
+    t.summary = summary
     t.rounds = prompt_count
     t.tool_calls = [
         ToolCall(tool=c.get("tool", ""), target=c.get("target", "")[:100])
