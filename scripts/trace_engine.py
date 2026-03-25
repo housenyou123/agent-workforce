@@ -117,10 +117,11 @@ def run_verification(calls: list[dict], files_modified: list[str], cwd: str) -> 
         if call.get("tool") == "Bash":
             cmd = call.get("target", "").lower()
             if any(k in cmd for k in ["build", "xcodebuild", "tsc", "next build", "vite build"]):
-                # 从 buffer 里我们没有 exit_code，只能从 target 推断
-                # 如果后续没有新的 build 调用，假设最后一次是最终结果
-                # TODO: 在 auto_trace.sh 中捕获 exit_code
-                result["build_passed"] = True  # 默认成功（失败的话 Claude 会重试）
+                # 检测到 build 命令被执行
+                # 当前无法确定 exit_code，标记为"已执行但结果未知"
+                # TODO: 在 auto_trace.sh 中捕获 exit_code 才能确定 pass/fail
+                result["build_passed"] = None  # None = 已执行但结果未知，不假装通过
+                result["build_ran"] = True
                 break
 
     # 2. Lint 检查
@@ -128,7 +129,8 @@ def run_verification(calls: list[dict], files_modified: list[str], cwd: str) -> 
         if call.get("tool") == "Bash":
             cmd = call.get("target", "").lower()
             if any(k in cmd for k in ["lint", "eslint", "swiftlint", "prettier", "ruff"]):
-                result["lint_passed"] = True
+                result["lint_passed"] = None  # 同上，结果未知
+                result["lint_ran"] = True
                 break
 
     # 3. 文件边界检查: 修改的文件是否都在 workdir 内
@@ -390,8 +392,10 @@ def process_session(
             method="POST",
         )
         urllib.request.urlopen(req, timeout=5)
-    except:
-        pass  # 服务端不可用时静默降级
+    except Exception as e:
+        # 服务端不可用时降级到本地，但记录失败原因（不静默吞掉）
+        import logging
+        logging.warning(f"[aw] server push failed: {e}")
 
     # 13. 飞书通知 — 只推 significant 和 critical
     if tier in ("significant", "critical"):

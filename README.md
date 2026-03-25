@@ -35,6 +35,17 @@ Orchestrator (Opus) ── 任务拆分 + 路由 + 仲裁
 2. **Claude Only** — 不引入外部 API，全部用 Claude 模型 + 本地 Qwen
 3. **人类确认三件事** — 新增 Agent / 模式切换 / 规则修改
 4. **飞书群反馈** — 所有审批、反馈、日报通过飞书群交互
+5. **参考资料优先** — 先找权威参考资料和仓库内规则，再进入分析和实现
+6. **先规则后实现** — 先收敛约束、contract、验收，再开始编码
+
+## 仓库入口
+
+建议 AI / 人类进入仓库后优先阅读：
+
+- `constitution.md` — 长期原则、协作哲学、决策边界
+- `AGENTS.md` — 当前项目导航、工作规则、关键路径
+- `CONTEXT.md` — 项目背景、历史决策、当前阶段
+- `rules/enforcement.yaml` — 系统级约束和执行边界
 
 ## 规则体系
 
@@ -47,6 +58,8 @@ Orchestrator (Opus) ── 任务拆分 + 路由 + 仲裁
 
 ```
 agent-workforce/
+├── constitution.md     # 协作宪法：长期原则、禁区、边界
+├── AGENTS.md           # AI 进入仓库后的作战手册
 ├── profiles/           # Agent Profile (版本化 YAML)
 │   ├── orchestrator/
 │   ├── ios_agent/
