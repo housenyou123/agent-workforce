@@ -105,18 +105,8 @@ def notify_task_complete(
     else:
         time_str = f"{duration_sec:.0f}s"
 
-    # 构造"做了什么"的描述
-    # files_summary 可能是多行的（每个文件一行 "  · filename (+30/-5)"）
-    result_lines = []
-    if files_summary:
-        result_lines.append(f"**变更**:\n{files_summary}")
-    if action_summary:
-        result_lines.append(f"**操作**: {action_summary}")
-    result_text = "\n".join(result_lines) if result_lines else "无文件变更"
-
-    # summary 作为主要信息（goal 现在传入的就是 summary）
-    goal_line = f"\n{goal}" if goal else ""
-
+    # 单层信息: project · agent · 耗时 + summary + 文件列表
+    # goal 现在传入的就是 summary (从 tool calls 生成)
     content = {
         "msg_type": "interactive",
         "card": {
@@ -130,9 +120,9 @@ def notify_task_complete(
                     "text": {
                         "tag": "lark_md",
                         "content": (
-                            f"**{project}** · {agent} · {time_str}\n"
-                            f"{result_text}"
-                            f"{goal_line}"
+                            f"**{project}** · {agent} · {time_str}"
+                            + (f" · ~${cost_usd:.2f}" if cost_usd > 0 else "")
+                            + (f"\n{files_summary}" if files_summary else "")
                         ),
                     },
                 },
