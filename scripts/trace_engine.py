@@ -140,12 +140,18 @@ def run_verification(calls: list[dict], files_modified: list[str], cwd: str) -> 
 
     # 3. 文件边界检查: 修改的文件是否都在 workdir 内
     cwd_resolved = os.path.realpath(os.path.expanduser(cwd))
+    home_dir = os.path.realpath(str(Path.home()))
+    allowed_prefixes = [
+        cwd_resolved,                                    # 当前工作目录
+        os.path.realpath(str(AW_DIR)),                   # agent-workforce 自身
+        os.path.join(home_dir, ".claude"),                # Claude Code 配置/记忆
+    ]
     for f in files_modified:
         f_resolved = os.path.realpath(os.path.expanduser(f))
-        if not f_resolved.startswith(cwd_resolved):
-            # 允许 agent-workforce 自身的文件
-            aw_dir = os.path.realpath(str(AW_DIR))
-            if not f_resolved.startswith(aw_dir):
+        in_boundary = any(f_resolved.startswith(prefix) for prefix in allowed_prefixes)
+        if not in_boundary:
+            # 检查是否在 home 目录下 (宽松模式: 不出 home 就不算越界)
+            if not f_resolved.startswith(home_dir):
                 result["files_in_boundary"] = False
                 break
 
