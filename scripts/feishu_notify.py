@@ -114,8 +114,8 @@ def notify_task_complete(
         result_lines.append(f"**操作**: {action_summary}")
     result_text = "\n".join(result_lines) if result_lines else "无文件变更"
 
-    # goal 作为次要信息
-    goal_line = f"\n**目标**: {goal}" if goal else ""
+    # summary 作为主要信息（goal 现在传入的就是 summary）
+    goal_line = f"\n{goal}" if goal else ""
 
     content = {
         "msg_type": "interactive",

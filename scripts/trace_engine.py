@@ -552,12 +552,10 @@ def process_session(
             # 加入成本
             action_str += f" · ~${cost['estimated_cost_usd']:.2f}"
 
-            # critical 加告警前缀
-            card_goal = goal[:80] if goal and not goal.startswith("(auto)") else ""
-
+            # 飞书显示 summary (agent 做了什么)，不显示用户原文
             notify_task_complete(
                 project=project,
-                goal=card_goal,
+                goal=summary,
                 agent=f"{agent_id} v1.0",
                 duration_sec=duration,
                 cost_usd=cost["estimated_cost_usd"],
