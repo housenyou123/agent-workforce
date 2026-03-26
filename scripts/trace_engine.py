@@ -369,6 +369,33 @@ def process_session(
         if c.get("tool") == "Read" and c.get("target", "")
     ))
 
+    # 6b. 如果路由未匹配，根据文件扩展名推断 agent
+    if agent_id == "unknown" and files_modified:
+        exts = [os.path.splitext(f)[1].lower() for f in files_modified]
+        if any(e == ".swift" for e in exts):
+            agent_id = "ios_agent"
+            scenario = "ios_development"
+        elif any(e in (".ts", ".tsx", ".jsx") for e in exts):
+            # 区分 web 和 backend: 看有没有 React/Vue 相关文件名
+            basenames = [os.path.basename(f).lower() for f in files_modified]
+            if any(k in n for n in basenames for k in ["view", "page", "component", "app.tsx", "index.tsx"]):
+                agent_id = "web_agent"
+                scenario = "web_frontend"
+            else:
+                agent_id = "backend_agent"
+                scenario = "backend_api"
+        elif any(e == ".py" for e in exts):
+            agent_id = "data_agent"
+            scenario = "data_analysis"
+        elif any(e in (".sh", ".yaml", ".yml", ".conf", ".toml") for e in exts):
+            agent_id = "infra_agent"
+            scenario = "infra"
+        elif any(e in (".go",) for e in exts):
+            agent_id = "backend_agent"
+            scenario = "backend_api"
+        else:
+            agent_id = "backend_agent"  # 最终 fallback
+
     # 7. 确定性验证
     verification = run_verification(calls, files_modified, cwd)
 

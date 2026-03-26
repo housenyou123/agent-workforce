@@ -306,8 +306,8 @@ def detect_scenario(cwd: str) -> tuple[str, str, str]:
         if rel.startswith(path_prefix):
             return project_id, scenario, agent_id
 
-    # 默认
-    return "unknown", "unknown", "backend_agent"
+    # 未匹配到路由，返回 unknown，agent 由 trace_engine 根据文件类型推断
+    return "unknown", "unknown", "unknown"
 
 
 if __name__ == "__main__":
