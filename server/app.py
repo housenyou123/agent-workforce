@@ -445,8 +445,11 @@ async def dashboard():
         # 最近 traces
         recent = db.execute("""
             SELECT trace_id, timestamp, project, agent_profile, goal,
-                   duration_sec, human_feedback, auto_score
-            FROM traces ORDER BY timestamp DESC LIMIT 20
+                   duration_sec, human_feedback, auto_score, raw_data
+            FROM traces
+            WHERE session_tier IS NULL
+               OR session_tier IN ('significant', 'critical')
+            ORDER BY timestamp DESC LIMIT 20
         """).fetchall()
 
         # Agent 统计 (7天)

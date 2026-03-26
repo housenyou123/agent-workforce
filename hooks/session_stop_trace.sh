@@ -45,8 +45,15 @@ echo "0" > "$AW_TRACES/.prompt_count" 2>/dev/null
 if [ -n "$RESULT" ]; then
     TRACE_ID=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('trace_id',''))" 2>/dev/null)
     TIER=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tier',''))" 2>/dev/null)
-    COST=$(echo "$RESULT" | python3 -c "import sys,json; print(f\"\${json.load(sys.stdin).get('cost_usd',0):.2f}\")" 2>/dev/null)
-
+    COST=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cost_usd',0))" 2>/dev/null)
     TRACE_COUNT=$(wc -l < "$AW_TRACES/$(date +%Y-%m-%d).jsonl" 2>/dev/null | tr -d ' ')
-    echo "{\"systemMessage\": \"[aw] ${TRACE_ID} (${TIER}, ${COST}) | Today: ${TRACE_COUNT:-0} traces\"}"
+
+    if [ "$TIER" = "significant" ] || [ "$TIER" = "critical" ]; then
+        # 有意义的 session: 终端 + 飞书都提示反馈
+        FEEDBACK_URL="http://118.196.147.14:9100/api/feedback?trace_id=${TRACE_ID}"
+        echo "{\"systemMessage\": \"[aw] ${TRACE_ID} | Rate: ${FEEDBACK_URL}&rating=3 (ok) or &rating=1 (bad) | Today: ${TRACE_COUNT:-0}\"}"
+    else
+        # trivial/normal: 静默记录
+        echo "{\"systemMessage\": \"[aw] ${TRACE_ID} traced | Today: ${TRACE_COUNT:-0}\"}"
+    fi
 fi

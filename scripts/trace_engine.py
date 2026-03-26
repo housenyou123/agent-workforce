@@ -282,14 +282,15 @@ def classify_session(
     if prompt_count > 5 and duration_sec > 600:
         return "critical"
 
-    # trivial: 纯查阅, 无修改, <2分钟
-    if files_modified_count == 0 and duration_sec < 120:
+    # trivial: 无文件修改 且 工具调用少
+    if files_modified_count == 0 and tool_call_count <= 3:
         return "trivial"
 
-    # significant: 多文件修改 或 耗时长
-    if files_modified_count > 5 or duration_sec > 900:
+    # significant: 有文件修改 (核心变化: 改了文件 = 有价值)
+    if files_modified_count >= 1:
         return "significant"
 
+    # normal: 有工具调用但没改文件 (查阅、命令执行等)
     return "normal"
 
 
