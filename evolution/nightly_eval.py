@@ -6,9 +6,16 @@ Agent Workforce — Nightly Evaluator (v2: 三层输出)
   Layer 2: Proposal — 提案 (推飞书等人类确认)
   Layer 3: Regression — 验证结果 (人类决定是否采纳)
 
-运行:
-  python evolution/nightly_eval.py --date 2026-03-25
-  cron: 0 2 * * * cd ~/agent-workforce && python evolution/nightly_eval.py
+运行方式:
+  方案 A (Claude Code CLI):
+    claude -p "$(cat evolution/nightly_prompt.md)" --allowedTools Bash,Read,Write
+
+  方案 C (Codex):
+    codex "请执行 ~/agent-workforce/evolution/nightly_agenda.md 中的 6 个模块"
+
+  直接运行 (本地 LLM / Claude API fallback):
+    python evolution/nightly_eval.py --date 2026-03-25
+    python evolution/nightly_eval.py --date 2026-03-25 --engine claude
 """
 
 import argparse
@@ -29,12 +36,55 @@ BASE_DIR = Path.home() / "agent-workforce"
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
 REPORTS_DIR = BASE_DIR / "reports"
 
+LLM_ENGINE = os.environ.get("AW_LLM_ENGINE", "local")  # local / claude
 LOCAL_LLM_URL = os.environ.get("LOCAL_LLM_URL", "http://localhost:8801/v1/chat/completions")
 LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "qwen3.5-35b")
 
 
-def call_local_llm(prompt: str, system: str = "", max_tokens: int = 2000) -> str:
-    """调用本地 Qwen3.5-35B"""
+def call_llm(prompt: str, system: str = "", max_tokens: int = 2000, engine: str = "") -> str:
+    """
+    调用 LLM 进行分析
+
+    engine:
+      "local"  — 本地 Qwen3.5-35B (默认, 零成本)
+      "claude" — 通过 Claude Code CLI 调用 (方案 A, 质量最高)
+    """
+    engine = engine or LLM_ENGINE
+
+    if engine == "claude":
+        return _call_claude_cli(prompt, system)
+    else:
+        return _call_llm(prompt, system, max_tokens)
+
+
+def _call_claude_cli(prompt: str, system: str = "") -> str:
+    """方案 A: 通过 Claude Code CLI 调用"""
+    import subprocess
+
+    full_prompt = prompt
+    if system:
+        full_prompt = f"[System: {system}]\n\n{prompt}"
+
+    try:
+        result = subprocess.run(
+            ["claude", "-p", full_prompt, "--output-format", "text"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        else:
+            print(f"[eval] claude cli failed: {result.stderr[:200]}")
+            return ""
+    except FileNotFoundError:
+        print("[eval] claude CLI not found, falling back to local LLM")
+        return _call_llm(prompt, system)
+    except Exception as e:
+        print(f"[eval] claude cli error: {e}")
+        return ""
+
+
+def _call_llm(prompt: str, system: str = "", max_tokens: int = 2000) -> str:
+    """本地 Qwen3.5-35B"""
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -56,7 +106,7 @@ def call_local_llm(prompt: str, system: str = "", max_tokens: int = 2000) -> str
             result = json.loads(resp.read())
             return result["choices"][0]["message"]["content"]
     except Exception as e:
-        print(f"[eval] LLM call failed: {e}")
+        print(f"[eval] local LLM failed: {e}")
         return ""
 
 
@@ -169,7 +219,7 @@ def generate_proposals(insights: list[dict], traces: list[dict]) -> list[dict]:
                 failure_goals = [{"goal": t.get("goal", "")[:100], "feedback": t.get("human_feedback")}
                                  for t in failures[:5]]
 
-                llm_response = call_local_llm(
+                llm_response = call_llm(
                     f"以下是 {agent_id} 的失败任务:\n{json.dumps(failure_goals, ensure_ascii=False)}\n\n"
                     f"请用一句话总结失败的共性原因，以及一条具体的改进建议。只输出 JSON: "
                     f'{{"root_cause": "...", "suggestion": "..."}}',
@@ -320,5 +370,10 @@ def run_nightly_evaluation(date_str: str) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Nightly Evaluator v2")
     parser.add_argument("--date", default=datetime.now(CST).strftime("%Y-%m-%d"))
+    parser.add_argument("--engine", choices=["local", "claude"], default=None,
+                        help="LLM engine: local (Qwen3.5-35B) or claude (Claude Code CLI)")
     args = parser.parse_args()
+    if args.engine:
+        global LLM_ENGINE
+        LLM_ENGINE = args.engine
     run_nightly_evaluation(args.date)
