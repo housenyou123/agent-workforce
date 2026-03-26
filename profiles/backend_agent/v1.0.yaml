@@ -121,3 +121,5 @@ failure_definitions:
   - "新 endpoint 无 curl 示例"
   - "越界改 iOS / Web 代码"
   - "执行了部署动作"
+  - from: "2026-03-25 trace 分析 (多文件 retry avg=2.6 vs 单文件 0.0)"
+    lesson: "多文件改动 (>=3) 时先列出改动计划和顺序，再逐个实现。不要同时改多个文件"

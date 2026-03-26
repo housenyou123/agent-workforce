@@ -205,6 +205,18 @@ p2_rules:
     check: "trace 中每个 Edit 前是否有对应文件的 Read"
     penalty: -0.1
 
+  - id: "P2-006"
+    name: "核心链路文件保护"
+    description: "trace_engine.py / session_stop_trace.sh / feishu_notify.py 改动前先确认有无已有 test case"
+    enforce: "trace_analysis"
+    action: "score_penalty"
+    data_evidence: "2026-03-25: 这三个文件占 50% 的修改量，是监控链路核心"
+    protected_files:
+      - "trace_engine.py"
+      - "session_stop_trace.sh"
+      - "feishu_notify.py"
+    penalty: -0.1
+
   - id: "P2-002"
     name: "最小变更原则"
     description: "只改目标要求的部分，不做额外重构/优化/美化"
