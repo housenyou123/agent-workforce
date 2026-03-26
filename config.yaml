@@ -70,6 +70,10 @@ project_routes:
   "projects/claude-api-proxy": {project: "claude-api-proxy", scenario: "infra", agent: "infra_agent"}
   "openclaw": {project: "openclaw", scenario: "backend_api", agent: "backend_agent"}
   "agent-workforce": {project: "agent-workforce", scenario: "infra", agent: "infra_agent"}
+  # VPN
+  "Desktop/enterprise-vpn-shadowrocket": {project: "enterprise-vpn", scenario: "backend_api", agent: "backend_agent"}
+  # 招聘
+  "招聘agent": {project: "recruiting-agent", scenario: "backend_api", agent: "backend_agent"}
 
 # ─── 工作时间 ───
 schedule:
