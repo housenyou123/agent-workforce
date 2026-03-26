@@ -114,3 +114,7 @@ failure_definitions:
   - "ESLint error"
   - "页面白屏"
   - "API 调用与 contract 不一致"
+
+lessons:
+  - from: "2026-03-25 trace 分析 (completion 0.50, 3 failed)"
+    lesson: "Web 项目改动后必须跑 vite build / next build 验证，不要只改代码不 build"

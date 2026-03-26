@@ -249,6 +249,8 @@ p3_rules:
 
   - id: "P3-001"
     name: "不确定时先澄清"
+    data_evidence: "2026-03-25: 4 条 retry>3 的 trace，goal 均为模糊指令（'先跳过'、'现在到哪了'）"
+    trigger: "goal 不含具体文件名、函数名或技术指标时"
     description: "目标模糊时先输出理解确认"
     enforce: "nightly_statistics"
     measure: "对比 '先澄清 vs 直接干' 的 auto_score 差异"

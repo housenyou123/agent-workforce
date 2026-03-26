@@ -229,3 +229,5 @@ lessons:
     lesson: "VPS 的 SSL 证书有过期时间 (2026-06-08)，需要定期续签"
   - from: "ai-daily-digest"
     lesson: "依赖 SSH tunnel 到 VPS 做国际流量代理，tunnel 断了日报就失败"
+  - from: "2026-03-25 trace 分析 (feishu_notify.py 被改 10 次)"
+    lesson: "修改飞书通知卡片时，先单独发测试消息验证格式，确认后再改 hook 调用。不要同时改模板和调用方"
