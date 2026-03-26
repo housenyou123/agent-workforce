@@ -118,3 +118,5 @@ failure_definitions:
 lessons:
   - from: "2026-03-25 trace 分析 (completion 0.50, 3 failed)"
     lesson: "Web 项目改动后必须跑 vite build / next build 验证，不要只改代码不 build"
+  - from: "VPN case study (重复验证)"
+    lesson: "改动后跑完整验证 (build + lint + curl health), 不要改一处验一处"

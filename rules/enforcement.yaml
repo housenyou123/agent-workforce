@@ -279,6 +279,20 @@ p3_rules:
     enforce: "nightly_statistics"
     measure: "对比 '自检 vs 不自检' 的 cross-review reject 率差异"
 
+  - id: "P3-004"
+    name: "方案切换必须记录 why"
+    data_evidence: "VPN case: 5+ 方案切换无记录, 导致重复尝试已排除方案"
+    description: "每次方案失败后在 plan 文件追加: 操作→结果→根因→排除理由"
+    enforce: "nightly_statistics"
+    measure: "方案切换后是否有 plan 文件更新"
+
+  - id: "P3-005"
+    name: "新方案先调研可行性"
+    data_evidence: "VPN case: 直接动手改配置, 发现不行再换, 浪费 ~5 个 session"
+    description: "新方案动手前确认: 技术可行/前提满足/无冲突/改动范围可控"
+    enforce: "nightly_statistics"
+    measure: "新方案 session 的首次成功率"
+
 # ============================================================================
 # 人类确认事项 (飞书群二次确认)
 # ============================================================================
