@@ -322,6 +322,8 @@ async def profiles_page():
             in_role = False
             in_can = False
             in_cannot = False
+            in_lessons = False
+            lessons = []
             for line in text.split("\n"):
                 stripped = line.strip()
                 if stripped.startswith("name:"):
@@ -329,27 +331,25 @@ async def profiles_page():
                 elif stripped.startswith("model:"):
                     model = stripped.split(":", 1)[1].strip().strip('"')
                 elif stripped.startswith("role:"):
-                    in_role = True
-                    in_can = False
-                    in_cannot = False
+                    in_role = True; in_can = False; in_cannot = False; in_lessons = False
                 elif stripped.startswith("can_do:"):
-                    in_can = True
-                    in_role = False
-                    in_cannot = False
+                    in_can = True; in_role = False; in_cannot = False; in_lessons = False
                 elif stripped.startswith("cannot_do:"):
-                    in_cannot = True
-                    in_role = False
-                    in_can = False
-                elif stripped.startswith("quality_gates:") or stripped.startswith("review_dimensions:") or stripped.startswith("workflow:") or stripped.startswith("lessons:") or stripped.startswith("projects:"):
-                    in_role = False
-                    in_can = False
-                    in_cannot = False
-                elif in_role and stripped.startswith("- ") is False and stripped and not stripped.startswith("#"):
+                    in_cannot = True; in_role = False; in_can = False; in_lessons = False
+                elif stripped.startswith("lessons:"):
+                    in_lessons = True; in_role = False; in_can = False; in_cannot = False
+                elif stripped.startswith(("quality_gates:", "review_dimensions:", "workflow:", "projects:", "done_spec_fields:", "failure_definitions:", "deployment_knowledge:", "capabilities:", "human_approval_required:")):
+                    in_role = False; in_can = False; in_cannot = False; in_lessons = False
+                elif in_role and not stripped.startswith("- ") and stripped and not stripped.startswith("#"):
                     role_lines.append(stripped)
                 elif in_can and stripped.startswith("- "):
                     can_do.append(stripped[2:].strip().strip('"'))
                 elif in_cannot and stripped.startswith("- "):
                     cannot_do.append(stripped[2:].strip().strip('"'))
+                elif in_lessons and stripped.startswith("lesson:"):
+                    lesson_text = stripped.split(":", 1)[1].strip().strip('"')
+                    if lesson_text:
+                        lessons.append(lesson_text)
 
             role_text = " ".join(role_lines)[:200]
             golden_dir = agent_dir / "golden_examples"
@@ -359,6 +359,13 @@ async def profiles_page():
 
             can_html = "".join(f"<li>{c}</li>" for c in can_do[:5])
             cannot_html = "".join(f"<li>{c}</li>" for c in cannot_do[:5])
+            lessons_html = "".join(f"<li>{l[:80]}</li>" for l in lessons[:6])
+            lessons_section = f"""
+                <div class="lessons-section">
+                    <div class="col-title">Lessons ({len(lessons)})</div>
+                    <ul class="lessons">{lessons_html}</ul>
+                </div>
+            """ if lessons else ""
 
             cards_html += f"""
             <div class="card">
@@ -368,6 +375,7 @@ async def profiles_page():
                         <span class="model-badge" style="background:{model_color}">{model}</span>
                         <span class="version-badge">{version}</span>
                         <span class="golden-badge">{golden_count} golden</span>
+                        <span class="lessons-badge">{len(lessons)} lessons</span>
                     </div>
                 </div>
                 <div class="role">{role_text}</div>
@@ -381,6 +389,7 @@ async def profiles_page():
                         <ul class="cannot">{cannot_html}</ul>
                     </div>
                 </div>
+                {lessons_section}
             </div>
             """
 
@@ -410,6 +419,9 @@ async def profiles_page():
             ul {{ font-size:13px; padding-left:16px; }}
             li {{ margin-bottom:3px; }}
             .cannot li {{ color:#dc2626; }}
+            .lessons-section {{ margin-top:12px; padding-top:12px; border-top:1px solid #f0f0f0; }}
+            .lessons li {{ color:#0369a1; font-style:italic; }}
+            .lessons-badge {{ background:#dbeafe; color:#1e40af; padding:2px 8px; border-radius:4px; font-size:12px; margin-left:4px; }}
         </style>
     </head>
     <body>
