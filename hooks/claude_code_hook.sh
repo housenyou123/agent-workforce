@@ -250,4 +250,35 @@ fi
 # 首次加载时检测
 _aw_auto_detect
 
+# ─── claude 退出后自动评分提示 ───
+_aw_post_claude() {
+    local last_trace="$AW_DIR/traces/.last_trace_id"
+    local last_url="$AW_DIR/traces/.last_feedback_url"
+
+    if [ -f "$last_trace" ] && [ -s "$last_trace" ]; then
+        local trace_id=$(cat "$last_trace")
+        local feedback_url=$(cat "$last_url" 2>/dev/null)
+
+        echo ""
+        echo -e "  ${_aw_bold}[aw] Rate ${trace_id}:${_aw_reset} 1=bad  2=ok  3=good  4=golden  Enter=skip"
+        read -t 15 -p "  > " rating
+
+        if [ -n "$rating" ] && [ -n "$feedback_url" ]; then
+            curl -sf "${feedback_url}&rating=${rating}" > /dev/null 2>&1
+            local fb_emoji=""
+            case "$rating" in
+                1) fb_emoji="bad" ;;
+                2) fb_emoji="ok" ;;
+                3) fb_emoji="good" ;;
+                4) fb_emoji="golden" ;;
+            esac
+            echo -e "  ${_aw_blue}[aw]${_aw_reset} ${fb_emoji}"
+        fi
+
+        # 清理
+        > "$last_trace"
+        > "$last_url"
+    fi
+}
+
 echo -e "${_aw_blue}[aw]${_aw_reset} Agent Workforce loaded. Commands: aw_start, aw_done, aw_quick, aw1-4, aws, awt, awr"
