@@ -132,10 +132,10 @@ def notify_task_complete(
                     "text": {
                         "tag": "lark_md",
                         "content": (
-                            f"[满意](http://118.196.147.14:9100/api/feedback?trace_id={trace_id}&rating=3) | "
-                            f"[还行](http://118.196.147.14:9100/api/feedback?trace_id={trace_id}&rating=2) | "
-                            f"[不满意](http://118.196.147.14:9100/api/feedback?trace_id={trace_id}&rating=1) | "
-                            f"[标杆](http://118.196.147.14:9100/api/feedback?trace_id={trace_id}&rating=4)"
+                            f"[满意](http://118.196.147.14/aw/api/feedback?trace_id={trace_id}&rating=3) | "
+                            f"[还行](http://118.196.147.14/aw/api/feedback?trace_id={trace_id}&rating=2) | "
+                            f"[不满意](http://118.196.147.14/aw/api/feedback?trace_id={trace_id}&rating=1) | "
+                            f"[标杆](http://118.196.147.14/aw/api/feedback?trace_id={trace_id}&rating=4)"
                         ),
                     },
                 },

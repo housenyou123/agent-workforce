@@ -26,7 +26,7 @@ from feishu_notify import notify_task_complete
 
 CST = timezone(timedelta(hours=8))
 AW_DIR = Path.home() / "agent-workforce"
-AW_SERVER = os.environ.get("AW_SERVER_URL", "http://118.196.147.14:9100")
+AW_SERVER = os.environ.get("AW_SERVER_URL", "http://118.196.147.14/aw")
 
 # ─── Claude 官网价格 (USD per 1M tokens, 2026-03) ───
 MODEL_PRICING = {
