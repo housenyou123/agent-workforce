@@ -108,6 +108,9 @@ class Trace:
     completion_score: Optional[float] = None     # [0, 1] 是否完成
     quality_score: Optional[float] = None        # [0, 1] 完成质量
 
+    # ─── 自动评分 ───
+    auto_feedback: Optional[int] = None          # 1=bad 2=fine 3=good 4=golden (机器自评)
+
     # ─── 人类反馈 ───
     human_feedback: Optional[str] = None         # thumbs_up / thumbs_down / rework / golden
     failure_type: Optional[str] = None           # misunderstanding / poor_execution / scope_creep / broken_output / inefficient / external_blocker

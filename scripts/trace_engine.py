@@ -260,6 +260,42 @@ def run_verification(calls: list[dict], files_modified: list[str], cwd: str) -> 
     return result
 
 
+def auto_rate(
+    completion_score: float,
+    retry_edits: int,
+    rounds: int,
+    files_modified_count: int,
+    verification: dict,
+) -> int:
+    """
+    自动评分: 1=bad 2=fine 3=good 4=golden
+
+    基于确定性信号，不依赖人类反馈。
+    """
+    # ─── 1 (bad): 硬性失败 ───
+    if verification.get("build_passed") is False:
+        return 1
+    if not verification.get("credentials_safe", True):
+        return 1
+    if not verification.get("files_in_boundary", True):
+        return 1
+
+    # ─── 2 (fine): 有挣扎信号 ───
+    if retry_edits > 2:
+        return 2
+    if rounds > 5:
+        return 2
+
+    # ─── 4 (golden): build 显式通过 + 干净执行 ───
+    if (verification.get("build_passed") is True
+            and retry_edits == 0
+            and files_modified_count >= 1):
+        return 4
+
+    # ─── 3 (good): 默认 ───
+    return 3
+
+
 def classify_session(
     duration_sec: float,
     tool_call_count: int,
@@ -456,7 +492,16 @@ def process_session(
     else:
         t.completion_status = "completed_with_concern"
 
-    # 9c. 双维度评分
+    # 9c. 自动评分
+    t.auto_feedback = auto_rate(
+        completion_score=0,
+        retry_edits=t.retry_edits,
+        rounds=prompt_count,
+        files_modified_count=len(files_modified),
+        verification=verification,
+    )
+
+    # 9d. 双维度评分
     # Completion Score: 是否完成 (确定性)
     cs = 0.0
     if t.deliverables_met:
@@ -490,7 +535,7 @@ def process_session(
     qs += det * 0.40
     # review_result (20%) — 暂时默认 pass
     qs += 1.0 * 0.20
-    # human_feedback (20%) — 需要后续填充
+    # human_feedback (20%) — 人类优先，auto_feedback 兜底
     fb = t.human_feedback
     if fb == "golden":
         qs += 1.0 * 0.20
@@ -500,8 +545,12 @@ def process_session(
         qs += 0.4 * 0.20
     elif fb == "thumbs_down":
         qs += 0.0 * 0.20
+    elif t.auto_feedback is not None:
+        # 无人类反馈，用自动评分
+        auto_map = {4: 1.0, 3: 0.8, 2: 0.4, 1: 0.0}
+        qs += auto_map.get(t.auto_feedback, 0.5) * 0.20
     else:
-        qs += 0.5 * 0.20  # 无反馈给中间值
+        qs += 0.5 * 0.20
     # implicit_signals (20%) — 暂时默认中等
     qs += 0.5 * 0.20
     t.quality_score = round(qs, 2)
@@ -599,6 +648,7 @@ def process_session(
         "trace_id": t.trace_id,
         "project": project,
         "tier": tier,
+        "auto_feedback": t.auto_feedback,
         "tool_calls": len(calls),
         "duration": duration,
         "cost_usd": cost["estimated_cost_usd"],

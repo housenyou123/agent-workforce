@@ -426,7 +426,7 @@ async def profiles_page():
     </head>
     <body>
         <h1>Agent Profiles</h1>
-        <div class="nav"><a href="/">Dashboard</a> / Profiles</div>
+        <div class="nav"><a href="./">Dashboard</a> / Profiles</div>
         <div class="cards">
             {cards_html}
         </div>
@@ -507,10 +507,10 @@ async def dashboard():
             <td>{dur}</td>
             <td style="font-size:20px">{fb}</td>
             <td>
-                <a href="/api/feedback?trace_id={r['trace_id']}&rating=3">👍</a>
-                <a href="/api/feedback?trace_id={r['trace_id']}&rating=2">🔄</a>
-                <a href="/api/feedback?trace_id={r['trace_id']}&rating=1">👎</a>
-                <a href="/api/feedback?trace_id={r['trace_id']}&rating=4">⭐</a>
+                <a href="api/feedback?trace_id={r['trace_id']}&rating=3">👍</a>
+                <a href="api/feedback?trace_id={r['trace_id']}&rating=2">🔄</a>
+                <a href="api/feedback?trace_id={r['trace_id']}&rating=1">👎</a>
+                <a href="api/feedback?trace_id={r['trace_id']}&rating=4">⭐</a>
             </td>
         </tr>"""
 
@@ -564,7 +564,7 @@ async def dashboard():
             <div class="stat"><div class="value">${cost:.2f}</div><div class="label">Cost</div></div>
         </div>
 
-        <h2>Agent Performance (7 days)  <a href="/profiles" style="font-size:14px;font-weight:400">View Profiles →</a></h2>
+        <h2>Agent Performance (7 days)  <a href="profiles" style="font-size:14px;font-weight:400">View Profiles →</a></h2>
         <table>
             <tr><th>Agent</th><th>Tasks</th><th>Avg Score</th><th>Cost</th></tr>
             {agents_html}

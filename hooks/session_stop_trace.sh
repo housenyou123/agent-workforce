@@ -48,17 +48,24 @@ if [ -n "$RESULT" ]; then
     COST=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cost_usd',0))" 2>/dev/null)
     TRACE_COUNT=$(wc -l < "$AW_TRACES/$(date +%Y-%m-%d).jsonl" 2>/dev/null | tr -d ' ')
 
+    AUTO_RATE=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('auto_feedback',''))" 2>/dev/null)
     FEEDBACK_BASE="http://118.196.147.14/aw/api/feedback?trace_id=${TRACE_ID}"
 
-    if [ "$TIER" = "significant" ] || [ "$TIER" = "critical" ]; then
-        # 有意义的 session: 通过 systemMessage 提示评分
-        # additionalContext 让下一次 session 开始时 Claude 知道上一次的评分情况
-        echo "{\"systemMessage\": \"[aw] ${TRACE_ID} (${TIER}) | Today: ${TRACE_COUNT:-0} | Rate: aw1=bad aw2=ok aw3=good aw4=golden\"}"
+    # 评分 emoji 映射
+    RATE_LABEL=""
+    case "$AUTO_RATE" in
+        1) RATE_LABEL="1/bad" ;;
+        2) RATE_LABEL="2/fine" ;;
+        3) RATE_LABEL="3/good" ;;
+        4) RATE_LABEL="4/golden" ;;
+    esac
 
-        # 同时写一个待评分文件，shell 快捷命令 aw1-4 读取
+    if [ "$TIER" = "significant" ] || [ "$TIER" = "critical" ]; then
+        echo "{\"systemMessage\": \"[aw] ${TRACE_ID} (${TIER}) | auto: ${RATE_LABEL} | Today: ${TRACE_COUNT:-0} | Override: aw1-4\"}"
+
         echo "${TRACE_ID}" > "$AW_TRACES/.last_trace_id"
         echo "${FEEDBACK_BASE}" > "$AW_TRACES/.last_feedback_url"
     else
-        echo "{\"systemMessage\": \"[aw] ${TRACE_ID} traced | Today: ${TRACE_COUNT:-0}\"}"
+        echo "{\"systemMessage\": \"[aw] ${TRACE_ID} traced | auto: ${RATE_LABEL} | Today: ${TRACE_COUNT:-0}\"}"
     fi
 fi
