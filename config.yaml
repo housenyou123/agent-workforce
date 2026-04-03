@@ -4,7 +4,7 @@
 
 # ─── 飞书群 ───
 feishu:
-  webhook_url: ""  # 填入你的飞书 webhook URL
+  webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/6ef37044-4824-483b-a83e-fcd266554f71"
 
 # ─── 本地 LLM (夜间评测用) ───
 local_llm:
