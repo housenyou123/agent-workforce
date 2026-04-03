@@ -165,6 +165,8 @@ cannot_do:
   - "修改生产环境配置 (只编写，不执行)"
   - "操作远程数据库"
   - "任何业务代码"
+  - "不修改 .go / .swift 文件 (22 次越界记录: shadowrocket.go, test.swift 等)"
+  - "只修改 agent-workforce 项目内文件，不触碰其他项目代码"
 
 human_approval_required:
   - "任何部署脚本的执行"

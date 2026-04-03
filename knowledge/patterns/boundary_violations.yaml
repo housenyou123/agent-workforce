@@ -1,0 +1,29 @@
+# Auto-generated pattern: File Boundary Violations
+# Last updated: 2026-04-03 15:24
+
+pattern: boundary_violation
+type: anti-pattern
+total_violations: 90
+
+description: |
+  Agent 修改了其能力域外的文件类型。
+  通常因为 session 跨越了多个项目，或路由错误。
+
+by_agent:
+  - backend_agent: 29
+  - infra_agent: 24
+  - netops_agent: 20
+  - web_agent: 10
+  - ios_agent: 7
+
+frequent_violations:
+  - "index.html": 22
+  - "md2feishu.mjs": 13
+  - "Dashboard.tsx": 6
+  - "index.css": 6
+  - "shadowrocket.go": 5
+  - "project.yml": 5
+  - "render_test.go": 3
+  - "ecosystem.config.cjs": 3
+  - "schemas.py": 3
+  - "import_talent.py": 3

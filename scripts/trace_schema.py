@@ -116,6 +116,12 @@ class Trace:
     failure_type: Optional[str] = None           # misunderstanding / poor_execution / scope_creep / broken_output / inefficient / external_blocker
     failure_note: Optional[str] = None
 
+    # ─── 文件边界检测 ───
+    boundary_violations: list[str] = field(default_factory=list)
+
+    # ─── 工作目录 ───
+    cwd: str = ""
+
     # ─── 隐式信号 (夜间计算) ───
     implicit_signals: Optional[ImplicitSignals] = None
 
@@ -292,22 +298,87 @@ def _load_project_routes() -> dict:
 
 _PROJECT_ROUTES = None
 
-def detect_scenario(cwd: str) -> tuple[str, str, str]:
+# ─── 三级路由: Session 上下文继承 ───
+_LAST_SESSION_ROUTE: tuple[str, str, str] | None = None
+
+
+# ─── 三级路由: 内容关键词推断 ───
+_CONTENT_KEYWORDS = {
+    "enterprise-vpn": {
+        "keywords": ["vpn", "shadowrocket", "wireguard", "xray", "proxy", "隧道", "503", "路由"],
+        "scenario": "network_ops",
+        "agent": "netops_agent",
+    },
+    "agent-workforce": {
+        "keywords": ["agent workforce", "trace", "profile", "nightly", "evolution", "workforce"],
+        "scenario": "infra",
+        "agent": "infra_agent",
+    },
+    "spot-playground": {
+        "keywords": ["spot playground", "spot-playground", "评测台", "评测平台", "benchmark", "eval platform", "玩法评测"],
+        "scenario": "web_frontend",
+        "agent": "web_agent",
+    },
+    "pixelbeat-ios": {
+        "keywords": ["pixelbeat", "pixel beat", "paparazzi"],
+        "scenario": "ios_development",
+        "agent": "ios_agent",
+    },
+    "dog-story": {
+        "keywords": ["dog story", "gossip dog", "八卦小狗", "sticker"],
+        "scenario": "ios_development",
+        "agent": "ios_agent",
+    },
+    "openclaw": {
+        "keywords": ["openclaw", "飞书助手", "feishu bot"],
+        "scenario": "backend_api",
+        "agent": "backend_agent",
+    },
+    "interview-bot": {
+        "keywords": ["interview", "面试", "简历", "resume", "候选人", "recruit", "招聘"],
+        "scenario": "backend_api",
+        "agent": "backend_agent",
+    },
+}
+
+
+def detect_scenario(cwd: str, goal: str = "") -> tuple[str, str, str]:
     """
-    从工作目录推断 project, scenario, agent
+    三级路由: 从工作目录/上下文/内容推断 project, scenario, agent
+
+    Level 1: 路径前缀匹配 (精确)
+    Level 2: Session 继承 — 短指令沿用上一条的 project (同进程内)
+    Level 3: 内容关键词推断 — 从 goal 文本推断
 
     Returns: (project_id, scenario, agent_id)
     """
-    global _PROJECT_ROUTES
+    global _PROJECT_ROUTES, _LAST_SESSION_ROUTE
     if _PROJECT_ROUTES is None:
         _PROJECT_ROUTES = _load_project_routes()
 
     home = str(Path.home())
     rel = cwd.replace(home + "/", "")
 
+    # Level 1: 路径前缀匹配
     for path_prefix, (project_id, scenario, agent_id) in _PROJECT_ROUTES.items():
         if rel.startswith(path_prefix):
-            return project_id, scenario, agent_id
+            result = (project_id, scenario, agent_id)
+            _LAST_SESSION_ROUTE = result
+            return result
+
+    # Level 2: Session 继承 — 短指令或 auto session 沿用上一条
+    is_short = len(goal) <= 15 or goal.startswith("(auto)")
+    if is_short and _LAST_SESSION_ROUTE is not None:
+        return _LAST_SESSION_ROUTE
+
+    # Level 3: 内容关键词推断
+    if goal:
+        goal_lower = goal.lower()
+        for project_id, cfg in _CONTENT_KEYWORDS.items():
+            if any(kw in goal_lower for kw in cfg["keywords"]):
+                result = (project_id, cfg["scenario"], cfg["agent"])
+                _LAST_SESSION_ROUTE = result
+                return result
 
     # 未匹配到路由，返回 unknown，agent 由 trace_engine 根据文件类型推断
     return "unknown", "unknown", "unknown"

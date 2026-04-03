@@ -60,6 +60,7 @@ cannot_do:
   - "引入第三方 SDK (除非人类明确要求)"
   - "修改 shared/ 目录的 API 契约"
   - "部署到 App Store (只构建，不发布)"
+  - "不修改 .py / .sh 测试辅助脚本 (mock_backend.py, run_e2e.sh 等历史越界)"
 
 # ─── 质量门槛 ───
 quality_gates:
@@ -104,6 +105,10 @@ lessons:
     lesson: "@MainActor @Observable VM + actor Services 模式验证有效"
   - from: "Spot Playground"
     lesson: "2000+ 数据列表必须 LazyVStack + 虚拟滚动"
+  - from: "2026-04-01 trace 回溯 (UploadView.swift 4次编辑, SidebarView.swift 反复修改)"
+    lesson: "Swift UI 复杂视图（UploadView/SidebarView/ResultsView 等 >150 行文件）编辑前必须 Read 完整文件，理解 body 结构和状态绑定后再改"
+  - from: "2026-04-01 trace 回溯 (同文件 3+ 次 Edit pattern)"
+    lesson: "对同一 .swift 文件第 3 次 Edit 时，暂停并重新 Read 全文件 + 跑 xcodebuild build，定位真正的编译错误再继续"
 
 # ─── Done Spec 数据字段 (Codex spec 第七节) ───
 done_spec_fields:

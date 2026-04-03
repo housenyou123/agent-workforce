@@ -66,6 +66,7 @@ cannot_do:
   - "直接操作生产服务器 (ssh / docker on remote)"
   - "修改 AI prompt 模板内容 (只改调用逻辑，不改 prompt 文案)"
   - "部署 (产出脚本，但不执行)"
+  - "不修改 .sh / .cjs / .mjs / .plist / .html 文件 (29 次越界记录)"
 
 quality_gates:
   must_pass:

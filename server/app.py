@@ -24,9 +24,20 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from contextlib import contextmanager
 
+import sys
+import asyncio
+import uuid
+
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+# Memory DB (from scripts/)
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+try:
+    from memory_db import MemoryDB
+except ImportError:
+    MemoryDB = None
 
 app = FastAPI(title="Agent Workforce", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -74,6 +85,23 @@ def init_db():
         """)
         db.execute("""
             CREATE INDEX IF NOT EXISTS idx_traces_project ON traces(project)
+        """)
+
+        # Skills 表
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS skills (
+                id TEXT PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT DEFAULT '',
+                content TEXT NOT NULL,
+                projects TEXT DEFAULT '[]',
+                agents TEXT DEFAULT '[]',
+                triggers TEXT DEFAULT '[]',
+                source_traces TEXT DEFAULT '[]',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                usage_count INTEGER DEFAULT 0
+            )
         """)
 
         # Done Spec 字段 (v2)
@@ -232,6 +260,53 @@ async def list_traces(
         ).fetchall()
 
     return [dict(r) for r in rows]
+
+
+@app.get("/api/traces/{trace_id}")
+async def get_trace_detail(trace_id: str):
+    """获取单条 trace 完整详情"""
+    with get_db() as db:
+        row = db.execute("SELECT * FROM traces WHERE trace_id = ?", (trace_id,)).fetchone()
+    if not row:
+        return JSONResponse({"error": "trace not found"}, status_code=404)
+    result = dict(row)
+    raw = {}
+    try:
+        raw = json.loads(result.get("raw_data") or "{}")
+    except:
+        pass
+    return {
+        "trace_id": result["trace_id"],
+        "timestamp": result["timestamp"],
+        "project": result["project"],
+        "scenario": result.get("scenario", ""),
+        "agent": result["agent_profile"],
+        "goal": result["goal"],
+        "summary": result.get("summary") or raw.get("summary", ""),
+        "duration_sec": result["duration_sec"],
+        "rounds": result.get("rounds", 0),
+        "auto_feedback": raw.get("auto_feedback"),
+        "quality_score": result.get("quality_score"),
+        "completion_score": result.get("completion_score"),
+        "completion_status": result.get("completion_status", ""),
+        "total_tokens": result["total_tokens"],
+        "estimated_cost_usd": result["estimated_cost_usd"],
+        "tokens_in": raw.get("tokens_in", 0),
+        "tokens_out": raw.get("tokens_out", 0),
+        "files_modified": raw.get("files_modified", []),
+        "context_files_read": raw.get("context_files_read", []),
+        "total_edits": raw.get("total_edits", 0),
+        "retry_edits": raw.get("retry_edits", 0),
+        "tool_calls": raw.get("tool_calls", []),
+        "tool_call_count": result["tool_call_count"],
+        "build_success": result["build_success"],
+        "verification_passed": result.get("verification_passed"),
+        "scope_respected": result.get("scope_respected"),
+        "boundary_violations": raw.get("boundary_violations", []),
+        "human_feedback": result["human_feedback"],
+        "session_tier": result.get("session_tier", ""),
+        "cwd": raw.get("cwd", ""),
+    }
 
 
 @app.get("/api/stats")
@@ -578,6 +653,537 @@ async def dashboard():
     </body>
     </html>
     """
+
+
+# =========================================================================
+# Skills CRUD API
+# =========================================================================
+
+@app.post("/api/skills")
+async def create_skill(request: Request):
+    """创建 Skill"""
+    data = await request.json()
+    name = data.get("name", "").strip()
+    content = data.get("content", "").strip()
+    if not name or not content:
+        return JSONResponse({"error": "name and content required"}, status_code=400)
+
+    skill_id = data.get("id") or f"skill_{uuid.uuid4().hex[:8]}"
+    now = datetime.now(CST).isoformat()
+
+    with get_db() as db:
+        try:
+            db.execute("""
+                INSERT INTO skills (id, name, description, content, projects, agents,
+                    triggers, source_traces, created_at, updated_at, usage_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            """, (
+                skill_id, name,
+                data.get("description", ""),
+                content,
+                json.dumps(data.get("projects", []), ensure_ascii=False),
+                json.dumps(data.get("agents", []), ensure_ascii=False),
+                json.dumps(data.get("triggers", []), ensure_ascii=False),
+                json.dumps(data.get("source_traces", []), ensure_ascii=False),
+                now, now,
+            ))
+        except sqlite3.IntegrityError:
+            return JSONResponse({"error": f"skill name '{name}' already exists"}, status_code=409)
+
+    return {"status": "ok", "id": skill_id}
+
+
+@app.get("/api/skills")
+async def list_skills(
+    project: str = Query(None),
+    agent: str = Query(None),
+    limit: int = Query(100),
+):
+    """列出 Skills，支持 project/agent 筛选"""
+    with get_db() as db:
+        conditions = []
+        params = []
+
+        if project:
+            # JSON array 里包含该 project
+            conditions.append("projects LIKE ?")
+            params.append(f'%"{project}"%')
+        if agent:
+            conditions.append("agents LIKE ?")
+            params.append(f'%"{agent}"%')
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+        rows = db.execute(
+            f"SELECT * FROM skills WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+            params + [limit]
+        ).fetchall()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        # 解析 JSON 字段
+        for field in ("projects", "agents", "triggers", "source_traces"):
+            try:
+                d[field] = json.loads(d[field])
+            except (json.JSONDecodeError, TypeError):
+                d[field] = []
+        results.append(d)
+
+    return results
+
+
+@app.get("/api/skills/{skill_id}")
+async def get_skill(skill_id: str):
+    """获取 Skill 详情"""
+    with get_db() as db:
+        row = db.execute("SELECT * FROM skills WHERE id = ?", (skill_id,)).fetchone()
+    if not row:
+        return JSONResponse({"error": "skill not found"}, status_code=404)
+
+    d = dict(row)
+    for field in ("projects", "agents", "triggers", "source_traces"):
+        try:
+            d[field] = json.loads(d[field])
+        except (json.JSONDecodeError, TypeError):
+            d[field] = []
+    return d
+
+
+@app.put("/api/skills/{skill_id}")
+async def update_skill(skill_id: str, request: Request):
+    """更新 Skill"""
+    data = await request.json()
+    now = datetime.now(CST).isoformat()
+
+    with get_db() as db:
+        existing = db.execute("SELECT id FROM skills WHERE id = ?", (skill_id,)).fetchone()
+        if not existing:
+            return JSONResponse({"error": "skill not found"}, status_code=404)
+
+        updates = []
+        params = []
+        for field in ("name", "description", "content"):
+            if field in data:
+                updates.append(f"{field} = ?")
+                params.append(data[field])
+        for field in ("projects", "agents", "triggers", "source_traces"):
+            if field in data:
+                updates.append(f"{field} = ?")
+                params.append(json.dumps(data[field], ensure_ascii=False))
+        if "usage_count" in data:
+            updates.append("usage_count = ?")
+            params.append(data["usage_count"])
+
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.append(skill_id)
+
+        db.execute(f"UPDATE skills SET {', '.join(updates)} WHERE id = ?", params)
+
+    return {"status": "ok", "id": skill_id}
+
+
+@app.delete("/api/skills/{skill_id}")
+async def delete_skill(skill_id: str):
+    """删除 Skill"""
+    with get_db() as db:
+        result = db.execute("DELETE FROM skills WHERE id = ?", (skill_id,))
+        if result.rowcount == 0:
+            return JSONResponse({"error": "skill not found"}, status_code=404)
+    return {"status": "ok", "id": skill_id}
+
+
+# =========================================================================
+# Activity Feed API
+# =========================================================================
+
+@app.get("/api/activity")
+async def activity_feed(
+    date: str = Query(None),
+    project: str = Query(None),
+    agent: str = Query(None),
+    limit: int = Query(50),
+):
+    """统一时间线 Activity Feed，从 traces 提取结构化摘要"""
+    with get_db() as db:
+        conditions = []
+        params = []
+
+        if date:
+            conditions.append("timestamp LIKE ?")
+            params.append(f"{date}%")
+        if project:
+            conditions.append("project = ?")
+            params.append(project)
+        if agent:
+            conditions.append("agent_profile LIKE ?")
+            params.append(f"%{agent}%")
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+        rows = db.execute(
+            f"""SELECT trace_id, timestamp, project, agent_profile,
+                       goal, summary, duration_sec, auto_score, quality_score,
+                       files_modified, raw_data, human_feedback
+                FROM traces WHERE {where}
+                ORDER BY timestamp DESC LIMIT ?""",
+            params + [limit]
+        ).fetchall()
+
+    activities = []
+    for r in rows:
+        raw = {}
+        try:
+            raw = json.loads(r["raw_data"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # 提取 summary: 优先 DB 列 → raw_data → goal
+        summary = r["summary"] or raw.get("summary", "") or (r["goal"] or "")[:100]
+
+        # 提取 files_modified
+        files_modified = []
+        try:
+            files_modified = json.loads(r["files_modified"] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # auto_feedback: 从 human_feedback 映射数值
+        feedback_score_map = {
+            "thumbs_down": 1, "rework": 2, "thumbs_up": 3, "golden": 4,
+        }
+        auto_feedback = feedback_score_map.get(r["human_feedback"])
+
+        activities.append({
+            "type": "trace",
+            "trace_id": r["trace_id"],
+            "timestamp": r["timestamp"],
+            "project": r["project"] or "",
+            "agent": r["agent_profile"] or "",
+            "summary": summary,
+            "auto_feedback": auto_feedback,
+            "quality_score": r["quality_score"] or raw.get("quality_score"),
+            "files_modified": files_modified,
+            "duration_sec": r["duration_sec"],
+        })
+
+    return activities
+
+
+@app.get("/api/activity/grouped")
+async def activity_feed_grouped(
+    date: str = Query(None),
+    project: str = Query(None),
+    agent: str = Query(None),
+    limit: int = Query(80),
+    gap_minutes: int = Query(30),
+):
+    """Session 聚合的 Activity Feed: 同 project + 30分钟内的 traces 合为一组"""
+    # 先获取原始 activity
+    activities = await activity_feed(date=date, project=project, agent=agent, limit=limit)
+
+    if not activities:
+        return []
+
+    # 按时间 + 项目分组
+    sessions = []
+    current = None
+
+    for item in activities:
+        ts_str = (item.get("timestamp") or "")[:19]
+        proj = item.get("project", "")
+        try:
+            from datetime import datetime as dt
+            ts = dt.fromisoformat(ts_str)
+        except Exception:
+            ts = None
+
+        should_merge = (
+            current is not None
+            and proj == current["project"]
+            and ts is not None
+            and current["_last_ts"] is not None
+            and abs((current["_last_ts"] - ts).total_seconds()) < gap_minutes * 60
+        )
+
+        if should_merge:
+            current["traces"].append(item)
+            current["_last_ts"] = ts
+            current["trace_count"] = len(current["traces"])
+            current["total_duration"] += item.get("duration_sec") or 0
+            fm = item.get("files_modified") or []
+            current["all_files"].extend(fm)
+        else:
+            if current:
+                current.pop("_last_ts", None)
+                current["all_files"] = list(set(current["all_files"]))
+                sessions.append(current)
+
+            current = {
+                "session_id": item.get("trace_id", ""),
+                "project": proj,
+                "agent": item.get("agent", ""),
+                "timestamp": item.get("timestamp", ""),
+                "trace_count": 1,
+                "total_duration": item.get("duration_sec") or 0,
+                "all_files": list(item.get("files_modified") or []),
+                "summary": item.get("summary", ""),
+                "auto_feedback": item.get("auto_feedback"),
+                "quality_score": item.get("quality_score"),
+                "traces": [item],
+                "_last_ts": ts,
+            }
+
+    if current:
+        current.pop("_last_ts", None)
+        current["all_files"] = list(set(current["all_files"]))
+        sessions.append(current)
+
+    return sessions
+
+
+# =========================================================================
+# Memory API
+# =========================================================================
+
+def _get_memory_db():
+    """获取 MemoryDB 实例，自动检测路径"""
+    if MemoryDB is None:
+        return None
+    # 本地: ~/agent-workforce/knowledge/memory.db
+    # 服务器: /opt/agent-workforce/knowledge/memory.db
+    local_path = Path.home() / "agent-workforce" / "knowledge" / "memory.db"
+    server_path = Path("/opt/agent-workforce/knowledge/memory.db")
+    db_path = local_path if local_path.exists() else server_path
+    return MemoryDB(db_path)
+
+
+@app.get("/api/memory/search")
+async def memory_search(
+    q: str = Query(..., description="搜索关键词"),
+    project: str = Query(""),
+    agent: str = Query(""),
+    limit: int = Query(10),
+):
+    """全文搜索记忆库"""
+    mdb = _get_memory_db()
+    if mdb is None:
+        return JSONResponse({"error": "MemoryDB not available"}, status_code=503)
+    try:
+        results = mdb.search(q, project=project, agent=agent, limit=limit)
+        return results
+    finally:
+        mdb.close()
+
+
+@app.get("/api/memory/recall")
+async def memory_recall(
+    project: str = Query(""),
+    agent: str = Query(""),
+    limit: int = Query(5),
+):
+    """按 project/agent 召回高重要性记忆"""
+    mdb = _get_memory_db()
+    if mdb is None:
+        return JSONResponse({"error": "MemoryDB not available"}, status_code=503)
+    try:
+        results = mdb.recall(project=project, agent=agent, limit=limit)
+        return results
+    finally:
+        mdb.close()
+
+
+@app.get("/api/memory/stats")
+async def memory_stats():
+    """记忆库统计"""
+    mdb = _get_memory_db()
+    if mdb is None:
+        return JSONResponse({"error": "MemoryDB not available"}, status_code=503)
+    try:
+        return mdb.stats()
+    finally:
+        mdb.close()
+
+
+# =========================================================================
+# Agent 增强 API
+# =========================================================================
+
+@app.get("/api/agents")
+async def list_agents(days: int = Query(30)):
+    """
+    列出所有 Agent，包含:
+    - 从 traces GROUP BY 统计 (任务数、平均分、成本等)
+    - 从 profiles 目录读取 YAML 元信息
+    """
+    with get_db() as db:
+        cutoff = (datetime.now(CST) - timedelta(days=days)).isoformat()
+        rows = db.execute("""
+            SELECT
+                agent_profile,
+                COUNT(*) as total_tasks,
+                AVG(auto_score) as avg_score,
+                AVG(quality_score) as avg_quality,
+                SUM(CASE WHEN human_feedback IN ('thumbs_up','golden') THEN 1 ELSE 0 END) as positive,
+                SUM(CASE WHEN human_feedback = 'thumbs_down' THEN 1 ELSE 0 END) as negative,
+                SUM(estimated_cost_usd) as total_cost,
+                AVG(duration_sec) as avg_duration,
+                MAX(timestamp) as last_active
+            FROM traces
+            WHERE timestamp > ?
+              AND agent_profile NOT IN ('unknown_v1.0', '')
+              AND agent_profile IS NOT NULL
+            GROUP BY agent_profile
+            ORDER BY total_tasks DESC
+        """, (cutoff,)).fetchall()
+
+    # 读取 profile YAML 元信息
+    profiles_meta = {}
+    profiles_path = Path(PROFILES_DIR)
+    if profiles_path.exists():
+        for agent_dir in profiles_path.iterdir():
+            if not agent_dir.is_dir():
+                continue
+            yamls = sorted(agent_dir.glob("v*.yaml"), reverse=True)
+            if not yamls:
+                continue
+            meta = {"dir": agent_dir.name, "version": yamls[0].stem}
+            # 简单解析 name/model
+            try:
+                text = yamls[0].read_text()
+                for line in text.split("\n"):
+                    stripped = line.strip()
+                    if stripped.startswith("name:"):
+                        meta["name"] = stripped.split(":", 1)[1].strip().strip('"')
+                    elif stripped.startswith("model:"):
+                        meta["model"] = stripped.split(":", 1)[1].strip().strip('"')
+            except Exception:
+                pass
+            profiles_meta[agent_dir.name] = meta
+
+    agents = []
+    for r in rows:
+        agent_id = r["agent_profile"] or "unknown"
+        d = dict(r)
+        # 匹配 profile 目录名 (agent_profile 可能包含版本号如 netops_agent_v1.0)
+        matched_profile = {}
+        for dirname, meta in profiles_meta.items():
+            if dirname in agent_id or agent_id in dirname:
+                matched_profile = meta
+                break
+        d["profile"] = matched_profile
+        agents.append(d)
+
+    return agents
+
+
+@app.get("/api/agents/{agent_id}")
+async def get_agent_detail(agent_id: str, days: int = Query(30)):
+    """
+    Agent 详情:
+    - 统计数据
+    - 绑定的 skills
+    - 最近 10 条 trace
+    - 热点文件 (最常修改的文件)
+    """
+    with get_db() as db:
+        cutoff = (datetime.now(CST) - timedelta(days=days)).isoformat()
+
+        # 统计
+        stats = db.execute("""
+            SELECT
+                COUNT(*) as total_tasks,
+                AVG(auto_score) as avg_score,
+                AVG(quality_score) as avg_quality,
+                SUM(CASE WHEN human_feedback IN ('thumbs_up','golden') THEN 1 ELSE 0 END) as positive,
+                SUM(CASE WHEN human_feedback = 'thumbs_down' THEN 1 ELSE 0 END) as negative,
+                SUM(estimated_cost_usd) as total_cost,
+                AVG(duration_sec) as avg_duration,
+                MAX(timestamp) as last_active,
+                MIN(timestamp) as first_seen
+            FROM traces
+            WHERE agent_profile LIKE ? AND timestamp > ?
+        """, (f"%{agent_id}%", cutoff)).fetchone()
+
+        if not stats or stats["total_tasks"] == 0:
+            return JSONResponse({"error": "agent not found or no traces"}, status_code=404)
+
+        # 最近 10 条 trace
+        recent_traces = db.execute("""
+            SELECT trace_id, timestamp, project, goal, summary,
+                   duration_sec, auto_score, quality_score, human_feedback, files_modified
+            FROM traces
+            WHERE agent_profile LIKE ?
+            ORDER BY timestamp DESC LIMIT 10
+        """, (f"%{agent_id}%",)).fetchall()
+
+        # 热点文件: 统计所有 files_modified
+        all_files_rows = db.execute("""
+            SELECT files_modified FROM traces
+            WHERE agent_profile LIKE ? AND timestamp > ?
+        """, (f"%{agent_id}%", cutoff)).fetchall()
+
+    # 计算热点文件
+    file_counts = {}
+    for row in all_files_rows:
+        try:
+            files = json.loads(row["files_modified"] or "[]")
+            for f in files:
+                fname = f if isinstance(f, str) else str(f)
+                file_counts[fname] = file_counts.get(fname, 0) + 1
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    hot_files = sorted(file_counts.items(), key=lambda x: -x[1])[:20]
+
+    # 绑定的 skills
+    bound_skills = []
+    with get_db() as db:
+        skill_rows = db.execute(
+            "SELECT id, name, description, usage_count FROM skills WHERE agents LIKE ?",
+            (f'%"{agent_id}"%',)
+        ).fetchall()
+        bound_skills = [dict(s) for s in skill_rows]
+
+    return {
+        "agent_id": agent_id,
+        "stats": dict(stats),
+        "recent_traces": [dict(r) for r in recent_traces],
+        "hot_files": [{"file": f, "count": c} for f, c in hot_files],
+        "skills": bound_skills,
+    }
+
+
+# =========================================================================
+# SSE 实时推送
+# =========================================================================
+
+@app.get("/sse")
+async def sse_stream():
+    """Server-Sent Events 端点，推送新 trace 通知"""
+    async def generate():
+        last_count = 0
+        while True:
+            try:
+                with get_db() as db:
+                    current_count = db.execute("SELECT COUNT(*) FROM traces").fetchone()[0]
+                if current_count > last_count:
+                    last_count = current_count
+                    data = json.dumps({"type": "trace:new", "count": current_count}, ensure_ascii=False)
+                    yield f"data: {data}\n\n"
+                elif last_count == 0:
+                    # 首次连接发送当前状态
+                    last_count = current_count
+                    data = json.dumps({"type": "connected", "count": current_count}, ensure_ascii=False)
+                    yield f"data: {data}\n\n"
+            except Exception:
+                pass
+            await asyncio.sleep(3)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
 
 
 if __name__ == "__main__":

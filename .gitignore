@@ -3,7 +3,24 @@ __pycache__/
 *.pyc
 _archive/
 .DS_Store
+
+# Hook temp files
 traces/.hook_buffer.jsonl
 traces/.current_goal
 traces/.prompt_count
 traces/.session_start
+traces/.memory_injected
+traces/.nightly_distill*.log
+
+# Local data (user-specific, not shared)
+knowledge/memory.db
+knowledge/vault/
+scripts/.claude/
+handoffs/
+
+# Frontend
+dashboard/node_modules/
+dashboard/dist/
+
+# Local deploy (contains SSH key path)
+scripts/deploy_v3.sh

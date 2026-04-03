@@ -40,6 +40,7 @@ if result:
 > "$BUFFER"
 > "$AW_TRACES/.current_goal" 2>/dev/null
 echo "0" > "$AW_TRACES/.prompt_count" 2>/dev/null
+rm -f "$AW_TRACES/.memory_injected" 2>/dev/null
 
 # 输出结果
 if [ -n "$RESULT" ]; then

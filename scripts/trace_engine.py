@@ -20,7 +20,7 @@ from pathlib import Path
 
 from trace_schema import (
     new_trace, save_trace, ToolCall, detect_scenario,
-    TRACES_DIR,
+    TRACES_DIR, _load_project_routes,
 )
 from feishu_notify import notify_task_complete
 
@@ -266,11 +266,13 @@ def auto_rate(
     rounds: int,
     files_modified_count: int,
     verification: dict,
+    tool_call_count: int = 0,
 ) -> int:
     """
-    自动评分: 1=bad 2=fine 3=good 4=golden
+    自动评分 v2: 1=bad 2=fine 3=good 4=golden
 
     基于确定性信号，不依赖人类反馈。
+    v2 变化: 放宽 golden 条件 + 收紧 fine 条件 + 加入效率信号
     """
     # ─── 1 (bad): 硬性失败 ───
     if verification.get("build_passed") is False:
@@ -280,20 +282,64 @@ def auto_rate(
     if not verification.get("files_in_boundary", True):
         return 1
 
+    # ─── 效率信号 ───
+    efficiency_ratio = (tool_call_count / max(files_modified_count, 1)) if files_modified_count > 0 else 0
+
     # ─── 2 (fine): 有挣扎信号 ───
     if retry_edits > 2:
         return 2
     if rounds > 5:
         return 2
+    # v2: 效率极低 (改1个文件用了15+次工具调用 且有 retry)
+    if efficiency_ratio > 15 and retry_edits >= 1:
+        return 2
+    # v2: 有 retry 且对话轮次多
+    if retry_edits >= 2 and rounds >= 3:
+        return 2
 
-    # ─── 4 (golden): build 显式通过 + 干净执行 ───
-    if (verification.get("build_passed") is True
-            and retry_edits == 0
-            and files_modified_count >= 1):
+    # ─── 4 (golden): 干净高效完成 ───
+    # v2: 不再要求显式 build pass，而是看整体信号
+    if retry_edits == 0 and files_modified_count >= 1:
+        # 显式 build 通过 → 直接 golden
+        if verification.get("build_passed") is True:
+            return 4
+        # 高效完成 (工具调用少、效率比合理)
+        if efficiency_ratio <= 5 and tool_call_count <= 10:
+            return 4
+    # 纯诊断/查阅类: 0 文件修改但快速完成
+    if files_modified_count == 0 and tool_call_count <= 3 and rounds <= 1:
         return 4
 
     # ─── 3 (good): 默认 ───
     return 3
+
+
+def check_file_boundary(agent_id: str, files_modified: list[str]) -> list[str]:
+    """
+    P3: 检查修改的文件类型是否与 agent 匹配
+
+    返回越界文件列表 (空=无越界)
+    """
+    AGENT_ALLOWED_EXTS = {
+        "ios_agent": {".swift", ".xib", ".storyboard", ".plist", ".entitlements", ".xcconfig"},
+        "backend_agent": {".go", ".ts", ".js", ".py", ".sql", ".json", ".yaml", ".yml"},
+        "web_agent": {".tsx", ".ts", ".jsx", ".js", ".css", ".html", ".json", ".svg"},
+        "data_agent": {".py", ".ipynb", ".csv", ".json", ".sql", ".parquet"},
+        "infra_agent": {".sh", ".yaml", ".yml", ".conf", ".toml", ".py", ".json", ".md"},
+        "netops_agent": {".go", ".conf", ".yaml", ".yml", ".sh", ".json", ".plist", ".md"},
+    }
+    allowed = AGENT_ALLOWED_EXTS.get(agent_id)
+    if not allowed:
+        return []
+
+    violations = []
+    for f in files_modified:
+        ext = os.path.splitext(f)[1].lower()
+        if ext and ext not in allowed:
+            # .md files are universally allowed
+            if ext != ".md":
+                violations.append(os.path.basename(f))
+    return violations
 
 
 def classify_session(
@@ -392,8 +438,8 @@ def process_session(
         except:
             duration = 0
 
-    # 5. 检测项目
-    project, scenario, agent_id = detect_scenario(cwd)
+    # 5. 检测项目 (三级路由: 路径 → session继承 → 内容推断)
+    project, scenario, agent_id = detect_scenario(cwd, goal=goal)
 
     # 6. 统计文件变更
     files_modified = list(set(
@@ -405,14 +451,42 @@ def process_session(
         if c.get("tool") == "Read" and c.get("target", "")
     ))
 
-    # 6b. 如果路由未匹配，根据文件扩展名推断 agent
+    # 6b. 如果路由未匹配，从所有路径线索反推项目和 agent
+    if project == "unknown":
+        import re
+        from collections import Counter
+
+        home = str(Path.home())
+        routes = _load_project_routes()
+
+        # 收集所有路径线索: Edit/Write/Read targets + Bash 命令中的绝对路径
+        all_paths = files_modified + files_read + [
+            c.get("target", "") for c in calls
+            if c.get("tool") in ("Edit", "Write", "Read") and c.get("target", "")
+        ]
+        # 从 Bash 命令 target 中提取 home 下的绝对路径
+        for c in calls:
+            if c.get("tool") == "Bash":
+                cmd = c.get("target", "")
+                all_paths.extend(re.findall(rf'{re.escape(home)}/[^\s\'";&|>]+', cmd))
+
+        route_votes = Counter()
+        for fpath in all_paths:
+            rel = fpath.replace(home + "/", "")
+            for path_prefix, route_val in routes.items():
+                if rel.startswith(path_prefix):
+                    route_votes[route_val] += 1
+                    break
+        if route_votes:
+            best = route_votes.most_common(1)[0][0]
+            project, scenario, agent_id = best
+
     if agent_id == "unknown" and files_modified:
         exts = [os.path.splitext(f)[1].lower() for f in files_modified]
         if any(e == ".swift" for e in exts):
             agent_id = "ios_agent"
             scenario = "ios_development"
         elif any(e in (".ts", ".tsx", ".jsx") for e in exts):
-            # 区分 web 和 backend: 看有没有 React/Vue 相关文件名
             basenames = [os.path.basename(f).lower() for f in files_modified]
             if any(k in n for n in basenames for k in ["view", "page", "component", "app.tsx", "index.tsx"]):
                 agent_id = "web_agent"
@@ -430,7 +504,7 @@ def process_session(
             agent_id = "backend_agent"
             scenario = "backend_api"
         else:
-            agent_id = "backend_agent"  # 最终 fallback
+            agent_id = "backend_agent"
 
     # 7. 确定性验证
     verification = run_verification(calls, files_modified, cwd)
@@ -447,6 +521,7 @@ def process_session(
         scenario=scenario,
         agent_profile=f"{agent_id}_v1.0",
     )
+    t.cwd = cwd
     t.summary = summary
     t.rounds = prompt_count
     t.tool_calls = [
@@ -492,16 +567,20 @@ def process_session(
     else:
         t.completion_status = "completed_with_concern"
 
-    # 9c. 自动评分
+    # 9c. 自动评分 (v2: 含效率信号)
     t.auto_feedback = auto_rate(
         completion_score=0,
         retry_edits=t.retry_edits,
         rounds=prompt_count,
         files_modified_count=len(files_modified),
         verification=verification,
+        tool_call_count=len(calls),
     )
 
-    # 9d. 双维度评分
+    # 9d. 文件类型边界检测 (P3: 交叉污染报警)
+    t.boundary_violations = check_file_boundary(agent_id, files_modified)
+
+    # 9e. 双维度评分
     # Completion Score: 是否完成 (确定性)
     cs = 0.0
     if t.deliverables_met:
@@ -520,39 +599,74 @@ def process_session(
         cs = 0.0  # 越界直接 0
     t.completion_score = round(cs, 2)
 
-    # Quality Score: 完成质量 (混合信号)
+    # Quality Score: 完成质量 — 基于实际可用信号
+    # 维度: 验证结果(25%) + 编辑效率(30%) + 执行效率(25%) + 反馈(20%)
     qs = 0.0
-    # deterministic_checks (40%)
-    det = 0.0
+
+    # 1. 验证结果 (25%) — build/lint 显式结果权重高，None 不加分也不扣分
+    det = 0.5  # 基线: 没跑验证给中等
     if verification.get("build_passed") is True:
-        det += 0.5
-    elif verification.get("build_passed") is None:
-        det += 0.25  # 没跑 build 给一半
+        det = 1.0
+    elif verification.get("build_passed") is False:
+        det = 0.0
     if verification.get("lint_passed") is True:
-        det += 0.5
-    elif verification.get("lint_passed") is None:
-        det += 0.25
-    qs += det * 0.40
-    # review_result (20%) — 暂时默认 pass
-    qs += 1.0 * 0.20
-    # human_feedback (20%) — 人类优先，auto_feedback 兜底
+        det = min(det + 0.2, 1.0)
+    elif verification.get("lint_passed") is False:
+        det = max(det - 0.2, 0.0)
+    qs += det * 0.25
+
+    # 2. 编辑效率 (30%) — retry_edits / total_edits 是最强的质量信号
+    if t.total_edits > 0:
+        retry_rate = t.retry_edits / t.total_edits
+        if retry_rate == 0:
+            edit_eff = 1.0    # 一次到位
+        elif retry_rate <= 0.15:
+            edit_eff = 0.8    # 轻微修正
+        elif retry_rate <= 0.30:
+            edit_eff = 0.55   # 明显挣扎
+        elif retry_rate <= 0.50:
+            edit_eff = 0.35   # 反复修改
+        else:
+            edit_eff = 0.15   # 严重问题
+    else:
+        edit_eff = 0.7  # 无编辑任务（查阅/命令），给中等偏上
+    qs += edit_eff * 0.30
+
+    # 3. 执行效率 (25%) — tool_call_count vs files_modified 的比例
+    if len(files_modified) > 0 and t.tool_call_count > 0:
+        # 理想: 每个文件 ~5 次工具调用 (读+改+验证)
+        ratio = t.tool_call_count / max(len(files_modified), 1)
+        if ratio <= 6:
+            exec_eff = 1.0    # 精准高效
+        elif ratio <= 12:
+            exec_eff = 0.75   # 正常
+        elif ratio <= 25:
+            exec_eff = 0.50   # 偏多
+        else:
+            exec_eff = 0.25   # 大量试错
+    elif t.tool_call_count <= 5:
+        exec_eff = 0.8  # 轻量任务
+    else:
+        exec_eff = 0.6  # 纯命令执行，中等
+    qs += exec_eff * 0.25
+
+    # 4. 反馈 (20%) — 人类优先，auto_feedback 兜底
     fb = t.human_feedback
     if fb == "golden":
-        qs += 1.0 * 0.20
+        fb_score = 1.0
     elif fb == "thumbs_up":
-        qs += 0.8 * 0.20
+        fb_score = 0.9
     elif fb == "rework":
-        qs += 0.4 * 0.20
+        fb_score = 0.35
     elif fb == "thumbs_down":
-        qs += 0.0 * 0.20
+        fb_score = 0.0
     elif t.auto_feedback is not None:
-        # 无人类反馈，用自动评分
         auto_map = {4: 1.0, 3: 0.8, 2: 0.4, 1: 0.0}
-        qs += auto_map.get(t.auto_feedback, 0.5) * 0.20
+        fb_score = auto_map.get(t.auto_feedback, 0.5)
     else:
-        qs += 0.5 * 0.20
-    # implicit_signals (20%) — 暂时默认中等
-    qs += 0.5 * 0.20
+        fb_score = 0.5  # 无反馈给中等
+    qs += fb_score * 0.20
+
     t.quality_score = round(qs, 2)
 
     # 10. Session 分类

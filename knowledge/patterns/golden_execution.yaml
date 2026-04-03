@@ -1,0 +1,18 @@
+# Auto-generated pattern: Golden Execution
+# Last updated: 2026-04-03 15:24
+
+pattern: golden_execution
+type: workflow
+golden_count: 139
+
+description: |
+  从 golden trace 中提炼的高效执行特征。
+
+characteristics:
+  avg_tool_calls_per_file: 2.4
+  retry_edits: 0
+  common_traits:
+    - "先 Read 目标文件，再精准 Edit"
+    - "工具调用 <= 5 次/文件"
+    - "无重复编辑同一文件"
+    - "对话轮次 <= 1"

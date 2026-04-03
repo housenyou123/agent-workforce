@@ -171,11 +171,30 @@ Agent Workforce 是一个围绕 Claude Code 构建的 AI 协作平台。
 - `docs/`
   架构和规范文档
 
+### Agent 编队 (v2.0, 2026-04-02 进化)
+
+| Agent | Model | 覆盖 | Trace占比 |
+|-------|-------|------|----------|
+| Backend Agent | Sonnet | 6 个后端项目 (TS+Python+Go) | 28% |
+| **NetOps Agent** 🆕 | Sonnet | VPN/网络诊断/云网络/代理服务 | ~28% (原归 Backend) |
+| Infra Agent | Sonnet | 脚本/CI/配置/AW系统本身 | 16% |
+| Web Agent | Sonnet | 5 个 Web 前端项目 | 10% |
+| Data Agent | Sonnet | UGC/VLM/数据分析 | 9% |
+| iOS Agent | Sonnet | PixelBeat/DogStory/IPGuard | 5% |
+| Orchestrator | Opus | 路由参考 (非独立运行) | — |
+| Reviewer | Sonnet | 验证清单 (非独立运行) | — |
+
+### 三级路由 (v2.0)
+
+1. **路径匹配**: cwd → `config.yaml:project_routes` 精确匹配
+2. **Session 继承**: 短指令/auto session → 沿用上一条 trace 的 project
+3. **内容推断**: goal 关键词 → `trace_schema._CONTENT_KEYWORDS` 匹配
+
 ### 核心链路
 
 1. 用户提出目标
 2. Claude Code hooks 捕获 goal / tool usage / stop
-3. trace 落本地 JSONL
+3. trace 落本地 JSONL (含三级路由 + auto_rate v2 + 边界检测)
 4. 服务端双写到 SQLite
 5. 飞书接收反馈 / 审批
 6. nightly evaluator 汇总并产出 insight / proposal
@@ -217,27 +236,22 @@ python3 /Users/housen/agent-workforce/cli.py evaluate --date 2026-03-25
 
 ---
 
-## 当前阶段建议
+## Evolution V2 (2026-04-02)
 
-当前阶段优先级：
+基于 537 条 trace 的回顾分析，执行了以下进化：
 
-1. 稳定 trace / feedback / verification 闭环
-2. 引入 run spec / done spec
-3. 明确 approval state 与 review state
-4. 让 nightly evaluator 先做 proposal-first，而不是自动魔改
+| 提案 | 效果 |
+|------|------|
+| P0 auto_feedback 回补 | 覆盖率 51% → 100% |
+| P1 三级路由 | unknown 率 44% → 25% |
+| P2 NetOps Agent | VPN 项目独立路由 |
+| P3 边界检测 | 检出 36 条越界 (6%) |
+| P5 auto_rate v2 | good 93% → 40%, golden 0% → 52% |
+| P6 interview-bot 路由 | 新增 68 条项目归属 |
 
-不建议当前阶段优先做：
+### 下一步
 
-1. 重型多 agent runtime
-2. 高自由度自治协作网络
-3. 大规模自动 profile 改写
-
-建议新增一个长期目录用于沉淀关键架构决策：
-
-- `docs/adr/`
-
-适合记录：
-
-- 为什么坚持 Claude-native 而不是重型 runtime
-- 为什么 evolution 先 proposal-first
-- 为什么完成定义要下沉到 run
+1. **观察新 trace 的 unknown 率** — 三级路由在实时场景下预期 <15%
+2. **auto_rate v2 校准** — 观察 golden 52% 是否过高，可能需要收紧
+3. **夜间评测** — 数据充足后跑 `evolution/nightly_eval.py --engine claude`
+4. **NetOps profile 注入** — 在 VPN 项目的 CLAUDE.md 中引用 profile

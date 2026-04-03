@@ -64,6 +64,7 @@ cannot_do:
   - "数据库操作"
   - "AI/ML 模型调用"
   - "部署"
+  - "不修改 .swift / .go / .sh 文件 (历史越界: Swift 7 次, Go 2 次, sh 越界)"
 
 quality_gates:
   must_pass:
@@ -120,3 +121,9 @@ lessons:
     lesson: "Web 项目改动后必须跑 vite build / next build 验证，不要只改代码不 build"
   - from: "VPN case study (重复验证)"
     lesson: "改动后跑完整验证 (build + lint + curl health), 不要改一处验一处"
+  - from: "2026-04-01 trace 回溯 (303 traces, retry率 36%)"
+    lesson: "编辑 >200 行的 TSX 组件前，必须先 Read 完整文件理解结构，不要盲改。App.tsx/MemoryPanel.tsx 等复杂组件尤其如此"
+  - from: "2026-04-01 trace 回溯 (同文件反复编辑 pattern)"
+    lesson: "对同一文件第 3 次 Edit 时，停下来重新 Read 全文件 + 检查 build error，再继续。连续盲试是低效的根源"
+  - from: "2026-04-01 trace 回溯 (模糊 goal 分析)"
+    lesson: "当用户 goal < 10 字且无明确动词时（如'好'、'先执行看看'），先确认意图再动手，不要猜测"

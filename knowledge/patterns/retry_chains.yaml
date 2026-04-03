@@ -1,0 +1,27 @@
+# Auto-generated pattern: Retry Chain Anti-Pattern
+# Last updated: 2026-04-03 15:24
+
+pattern: retry_chain
+type: anti-pattern
+occurrences: 4
+total_retries: 8
+
+description: |
+  用户连续说'还是不行'/'再试试' 形成的重试链。
+  根因通常是 Agent 没有建立完整的问题模型就开始修改。
+
+signal:
+  - "用户 goal 包含: 还是/不���/再试/503"
+  - "同文件修改 3+ 次"
+  - "网络检查命令 > 5 次"
+
+fix:
+  - "停下来，先画出完整的系统拓扑或调用链"
+  - "Read 完整文件，理解上下游依赖"
+  - "一次性跑完整验证套件，不要逐条试"
+
+examples:
+  - project: unknown, length: 2, traces: ['tr_20260325_051', 'tr_20260325_052']
+  - project: enterprise-vpn, length: 2, traces: ['tr_20260325_061', 'tr_20260325_062']
+  - project: spot-playground, length: 2, traces: ['tr_20260401_007', 'tr_20260401_008']
+  - project: enterprise-vpn, length: 2, traces: ['tr_20260402_006', 'tr_20260402_007']
